@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 
-const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
+if (!process.env.PYTHON_BACKEND_URL) {
+  throw new Error("PYTHON_BACKEND_URL environment variable is required. Set it in .env.local");
+}
+const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL;
 
 export async function POST(req: NextRequest) {
   try {

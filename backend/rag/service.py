@@ -6,9 +6,15 @@ from dotenv import load_dotenv
 load_dotenv()
 client = genai.Client()
 
-CHROMA_API_KEY = os.environ.get("CHROMA_API_KEY", "ck-8EDvMFyr6h4D8D3TSThUc5qWJLVu6vjG8M7RzdAmh8GM")
-CHROMA_TENANT = os.environ.get("CHROMA_TENANT", "feb6bb3b-9982-43bf-8cd7-168b94dc26e3")
-CHROMA_DATABASE = os.environ.get("CHROMA_DATABASE", "youtube-note")
+CHROMA_API_KEY = os.environ.get("CHROMA_API_KEY")
+CHROMA_TENANT = os.environ.get("CHROMA_TENANT")
+CHROMA_DATABASE = os.environ.get("CHROMA_DATABASE")
+
+if not all([CHROMA_API_KEY, CHROMA_TENANT, CHROMA_DATABASE]):
+    raise RuntimeError(
+        "Missing required env vars: CHROMA_API_KEY, CHROMA_TENANT, CHROMA_DATABASE. "
+        "Please set them in your .env file."
+    )
 
 # Connect explicitly to Official Chroma Cloud
 chroma_client = chromadb.CloudClient(
