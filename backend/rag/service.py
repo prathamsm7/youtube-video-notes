@@ -1,10 +1,42 @@
 import os
+import json
 from google import genai
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
+from tenacity import retry, wait_exponential, stop_after_attempt
+from upstash_redis import Redis
+from utils.youtube import get_transcript
 
 load_dotenv()
 client = genai.Client()
+
+REDIS_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
+REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+if REDIS_URL and REDIS_TOKEN:
+    redis_client = Redis(url=REDIS_URL, token=REDIS_TOKEN)
+else:
+    redis_client = None
+
+def update_job_status(video_id: str, status: str, total_chunks: int = 0, processed_chunks: int = 0, error: str = None):
+    if not redis_client:
+        return
+    job_key = f"job:{video_id}"
+    data = {"status": status, "total_chunks": total_chunks, "processed_chunks": processed_chunks}
+    if error:
+        data["error"] = error
+    redis_client.set(job_key, json.dumps(data), ex=172800) # 48 hours expiry
+
+def get_job_status(video_id: str):
+    if not redis_client:
+        return None
+    job_key = f"job:{video_id}"
+    data = redis_client.get(job_key)
+    if data:
+        try:
+            return json.loads(data)
+        except:
+            return data
+    return None
 
 QDRANT_URL = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
@@ -146,38 +178,27 @@ def semantic_chunk_transcript(
 
     return chunks
 
-import time
+@retry(wait=wait_exponential(multiplier=1, min=2, max=60), stop=stop_after_attempt(5))
+def fetch_embeddings_with_retry(batch_texts):
+    result = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=batch_texts,
+        config={
+            "task_type": "RETRIEVAL_DOCUMENT",
+        }
+    )
+    return [e.values for e in result.embeddings]
 
-def batch_embed(texts, batch_size=100):
-    all_embeddings = []
-    # gemini-embedding-001 supports true batching (unlike embedding-2-preview)
-    # This reduces your daily request quota usage (RPD) significantly.
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
-        result = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=batch,
-            config={
-                "task_type": "RETRIEVAL_DOCUMENT",
-            }
-        )
-        all_embeddings.extend([e.values for e in result.embeddings])
-        print(len(all_embeddings))
-        # Small delay between batches to stay safe on RPM
-        # if i + batch_size < len(texts):
-        #     time.sleep(1)
-            
-    return all_embeddings
-
-def process_and_store_video(video_id: str, transcript: list[dict]):
-    """Chunks transcript, embeds it and stores it in Qdrant collection under video_id."""
-    chunks = semantic_chunk_transcript(transcript)
-    print(f"Chunks: {len(chunks)}")
-    texts = [c["text"] for c in chunks]
-    embeddings = batch_embed(texts)
+def process_and_store_video(video_id: str, batch_size: int = 100):
+    """Fetches transcript, chunks it, embeds it and stores it securely."""
+    update_job_status(video_id, "extracting")
+    transcript = get_transcript(video_id)
     
-    # Qdrant collection names can't contain certain characters, but YouTube IDs are safe
+    update_job_status(video_id, "chunking")
+    chunks = semantic_chunk_transcript(transcript)
     collection_name = f"video_{video_id.replace('-', '_')}" 
+    
+    update_job_status(video_id, "embedding", len(chunks), 0)
 
     # Ensure collection exists
     if not qdrant_client.collection_exists(collection_name=collection_name):
@@ -186,25 +207,41 @@ def process_and_store_video(video_id: str, transcript: list[dict]):
             vectors_config=models.VectorParams(size=3072, distance=models.Distance.COSINE),
         )
         
-    points = [
-        models.PointStruct(
-            id=i,
-            vector=emb,
-            payload={
-                "text": chunks[i]["text"],
-                "start": chunks[i]["start"],
-                "end": chunks[i]["end"]
-            }
-        ) for i, emb in enumerate(embeddings)
-    ]
-    
-    qdrant_client.upload_points(
-        collection_name=collection_name,
-        points=points,
-        batch_size=64,     # Smaller batches prevent "Write operation timed out"
-        parallel=2,        # Use 2 parallel workers for speed
-        wait=True
-    )
+    existing_count = qdrant_client.count(collection_name=collection_name).count
+    if existing_count >= len(chunks):
+        update_job_status(video_id, "completed", len(chunks), existing_count)
+        return True
+        
+    for i in range(existing_count, len(chunks), batch_size):
+        batch_chunks = chunks[i:i + batch_size]
+        texts = [c["text"] for c in batch_chunks]
+        
+        try:
+            embeddings = fetch_embeddings_with_retry(texts)
+            points = [
+                models.PointStruct(
+                    id=i + j,
+                    vector=emb,
+                    payload={
+                        "text": batch_chunks[j]["text"],
+                        "start": batch_chunks[j]["start"],
+                        "end": batch_chunks[j]["end"]
+                    }
+                ) for j, emb in enumerate(embeddings)
+            ]
+            
+            qdrant_client.upload_points(
+                collection_name=collection_name,
+                points=points,
+                wait=True
+            )
+            update_job_status(video_id, "processing", len(chunks), i + len(batch_chunks))
+        except Exception as e:
+            print(f"Failed to process batch at {i}: {e}")
+            update_job_status(video_id, "failed", len(chunks), i, str(e))
+            return False # Stop processing this video
+            
+    update_job_status(video_id, "completed", len(chunks), len(chunks))
     return True
 
 def filter_chunks(results, threshold=0.7):

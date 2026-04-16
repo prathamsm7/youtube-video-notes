@@ -1,12 +1,12 @@
 import re
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from rag.service import process_and_store_video, process_query, qdrant_client
-from utils.youtube import get_transcript, get_video_title
+from rag.service import process_and_store_video, process_query, qdrant_client, get_job_status
+from utils.youtube import get_video_title
 
 app = FastAPI(title="YouTube RAG (AI Focused)")
 
@@ -32,38 +32,43 @@ def extract_video_id(url: str) -> str:
     return match.group(1) if match else url
 
 @app.post("/process_video")
-async def process_video(request: VideoRequest):
+async def process_video(request: VideoRequest, background_tasks: BackgroundTasks):
     try:
         video_id = extract_video_id(request.youtube_url)
         title = get_video_title(video_id)
         
+        # Check if already fully processed
         try:
-            # Check if already processed in Qdrant
-            collection_name = f"video_{video_id.replace('-', '_')}"
-            if qdrant_client.collection_exists(collection_name=collection_name):
-                # Check if it has points
-                count_result = qdrant_client.count(collection_name=collection_name)
-                if count_result.count > 0:
-                    return {
-                        "status": "success", 
-                        "video_id": video_id, 
-                        "title": title,
-                        "message": "Already processed"
-                    }
+            job_status = get_job_status(video_id)
+            if job_status and job_status.get("status") == "completed":
+                return {
+                    "status": "success", 
+                    "video_id": video_id, 
+                    "title": title,
+                    "message": "Already processed"
+                }
         except Exception:
             pass 
-
-        transcript = get_transcript(video_id)
-        process_and_store_video(video_id, transcript)
+        
+        # Send processing to the background immediately to avoid timeout
+        background_tasks.add_task(process_and_store_video, video_id)
+        
         return {
-            "status": "success", 
+            "status": "processing_started", 
             "video_id": video_id, 
             "title": title,
-            "message": "Processed successfully"
+            "message": "Processing started in background."
         }
     except Exception as e:
-        print(f"Error processing video: {e}")
+        print(f"Error starting video process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/status/{video_id}")
+async def check_status(video_id: str):
+    job_status = get_job_status(video_id)
+    if not job_status:
+        return {"status": "unknown", "message": "No job found. It may be expired or never started."}
+    return job_status
 
 @app.post("/ask")
 async def ask_question(request: AskRequest):

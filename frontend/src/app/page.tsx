@@ -38,6 +38,10 @@ export default function YouTubeChatPage() {
   const [notionConnected, setNotionConnected] = useState(false);
   const [savingToNotion, setSavingToNotion] = useState<string | null>(null);
 
+  type JobStatus = "idle" | "extracting" | "chunking" | "embedding" | "processing" | "completed" | "failed";
+  const [jobPhase, setJobPhase] = useState<JobStatus>("idle");
+  const [progress, setProgress] = useState({ processed: 0, total: 0 });
+
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -106,11 +110,12 @@ export default function YouTubeChatPage() {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const handleProcessVideo = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleProcessVideo = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!url.trim()) return;
 
     setIsProcessing(true);
+    setJobPhase("extracting");
     setError(null);
 
     try {
@@ -127,20 +132,76 @@ export default function YouTubeChatPage() {
 
       setVideoId(data.video_id);
       setVideoTitle(data.title);
-      setMessages([
-        {
-          id: Date.now().toString(),
-          role: "assistant",
-          content: "I've successfully transcribed and analyzed the video! What would you like to know about it?",
-        },
-      ]);
+      
+      if (data.status === "success") {
+        setJobPhase("completed");
+        setMessages([
+          {
+            id: Date.now().toString(),
+            role: "assistant",
+            content: "I've successfully transcribed and analyzed the video! What would you like to know about it?",
+          },
+        ]);
+        setIsProcessing(false);
+      } else {
+        setJobPhase("extracting");
+      }
     } catch (err: unknown) {
       const msgText = err instanceof Error ? err.message : "An unexpected error occurred.";
       setError(msgText);
-    } finally {
+      setJobPhase("failed");
       setIsProcessing(false);
     }
   };
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    const checkStatus = async () => {
+      if (!videoId || jobPhase === "completed" || jobPhase === "failed" || jobPhase === "idle") return;
+
+      try {
+        const res = await apiFetch(`/api/ai/status/${videoId}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+        
+        if (data.status) {
+          setJobPhase(data.status as JobStatus);
+          
+          if (data.total_chunks) {
+            setProgress({ processed: data.processed_chunks || 0, total: data.total_chunks });
+          }
+
+          if (data.status === "completed") {
+            setIsProcessing(false);
+            setMessages([
+              {
+                id: Date.now().toString(),
+                role: "assistant",
+                content: "I've successfully transcribed and analyzed the video! What would you like to know about it?",
+              },
+            ]);
+            clearInterval(interval);
+          } else if (data.status === "failed") {
+            setIsProcessing(false);
+            setError(`Failed during ${jobPhase}: ${data.error || "Unknown error"}`);
+            clearInterval(interval);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to poll status", error);
+      }
+    };
+
+    if (jobPhase !== "idle" && jobPhase !== "completed" && jobPhase !== "failed" && videoId) {
+      interval = setInterval(checkStatus, 5000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [videoId, jobPhase, apiFetch]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -241,7 +302,7 @@ export default function YouTubeChatPage() {
 
       <main className="pt-24 pb-24 md:pt-32 px-4 max-w-5xl mx-auto min-h-screen flex flex-col">
         <AnimatePresence mode="wait">
-          {!videoId ? (
+          {jobPhase === "idle" ? (
             <motion.div
               key="landing"
               initial={{ opacity: 0, y: 20 }}
@@ -310,6 +371,67 @@ export default function YouTubeChatPage() {
                 <span className="flex items-center gap-2"><Sparkles className="w-4 h-4" /> Smart RAG</span>
                 <span className="flex items-center gap-2"><Youtube className="w-4 h-4" /> Auto-Captions</span>
               </div>
+            </motion.div>
+          ) : jobPhase !== "completed" ? (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              className="flex-1 flex flex-col items-center justify-center text-center max-w-xl mx-auto w-full space-y-10"
+            >
+               <div className="relative flex items-center justify-center">
+                 <div className="absolute inset-0 rounded-full bg-purple-500/20 blur-xl animate-pulse" />
+                 <div className="w-24 h-24 rounded-full border-t-2 border-r-2 border-purple-500 animate-spin z-10" />
+                 <Loader2 className="w-8 h-8 text-white absolute animate-pulse z-10" />
+               </div>
+
+               <div className="space-y-3">
+                 <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-400">
+                   {jobPhase === "extracting" && "Extracting Transcript..."}
+                   {jobPhase === "chunking" && "Analyzing & Chunking..."}
+                   {(jobPhase === "embedding" || jobPhase === "processing") && "Generating AI Embeddings..."}
+                   {jobPhase === "failed" && "Processing Paused"}
+                 </h2>
+                 <p className="text-neutral-500 font-medium max-w-md mx-auto">
+                   {jobPhase === "extracting" && "Connecting to YouTube directly. This is super fast."}
+                   {jobPhase === "chunking" && "Grouping text organically by natural pauses and sentences."}
+                   {(jobPhase === "embedding" || jobPhase === "processing") && "Using Gemini 001 to convert text into vector embeddings."}
+                 </p>
+               </div>
+               
+               {(jobPhase === "embedding" || jobPhase === "processing") && progress.total > 0 && (
+                 <div className="w-full space-y-4 max-w-lg">
+                   <div className="h-4 bg-neutral-900 rounded-full overflow-hidden border border-white/10 w-full relative">
+                     <motion.div 
+                       className="absolute top-0 left-0 bottom-0 bg-gradient-to-r from-purple-500 to-blue-500"
+                       initial={{ width: 0 }}
+                       animate={{ width: `${Math.min(100, (progress.processed / progress.total) * 100)}%` }}
+                       transition={{ duration: 0.5 }}
+                     />
+                   </div>
+                   <div className="flex justify-between text-neutral-400 text-sm font-medium">
+                     <span>Processed {progress.processed} of {progress.total} chunks</span>
+                     <span>{((progress.processed / progress.total) * 100).toFixed(0)}%</span>
+                   </div>
+                 </div>
+               )}
+
+               {jobPhase === "failed" && (
+                 <div className="space-y-6 pt-4">
+                   <p className="text-red-400 bg-red-500/10 border border-red-500/20 px-6 py-4 rounded-xl">
+                     {error || "An API failure occurred (likely rate limit)."}
+                   </p>
+                   <div className="flex gap-4 justify-center">
+                     <button onClick={() => { setJobPhase("idle"); setIsProcessing(false); }} className="px-6 py-3 bg-neutral-800 rounded-xl font-medium hover:bg-neutral-700 transition">
+                       Cancel
+                     </button>
+                     <button onClick={() => handleProcessVideo()} className="px-6 py-3 bg-purple-600 rounded-xl font-medium hover:bg-purple-500 transition shadow-lg shadow-purple-500/20">
+                       Resume Processing
+                     </button>
+                   </div>
+                 </div>
+               )}
             </motion.div>
           ) : (
             <motion.div
