@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from rag.service import process_and_store_video, process_query, chroma_client
+from rag.service import process_and_store_video, process_query, qdrant_client
 from utils.youtube import get_transcript, get_video_title
 
 app = FastAPI(title="YouTube RAG (AI Focused)")
@@ -38,15 +38,18 @@ async def process_video(request: VideoRequest):
         title = get_video_title(video_id)
         
         try:
-            # Check if already processed in Chroma
-            collection = chroma_client.get_collection(name=video_id)
-            if collection.count() > 0:
-                return {
-                    "status": "success", 
-                    "video_id": video_id, 
-                    "title": title,
-                    "message": "Already processed"
-                }
+            # Check if already processed in Qdrant
+            collection_name = f"video_{video_id.replace('-', '_')}"
+            if qdrant_client.collection_exists(collection_name=collection_name):
+                # Check if it has points
+                count_result = qdrant_client.count(collection_name=collection_name)
+                if count_result.count > 0:
+                    return {
+                        "status": "success", 
+                        "video_id": video_id, 
+                        "title": title,
+                        "message": "Already processed"
+                    }
         except Exception:
             pass 
 
