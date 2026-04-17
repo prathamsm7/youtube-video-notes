@@ -7,6 +7,8 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 from upstash_redis import Redis
 from utils.youtube import get_transcript
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from rag.router import rule_based_filter, classify_intent
 load_dotenv()
 client = genai.Client()
 
@@ -290,7 +292,77 @@ def merge_chunks(docs, metas, gap=20):
     merged.append(current)
     return merged
 
+def format_timestamp(seconds: float):
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+def map_reduce_summary(video_id: str) -> str:
+    transcript = get_transcript(video_id)
+    if not transcript:
+        return "No transcript available to summarize."
+        
+    full_text = []
+    for entry in transcript:
+        ts = format_timestamp(entry['start'])
+        full_text.append(f"[{ts}] {entry['text']}")
+        
+    merged_text = " ".join(full_text)
+    
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=10000, 
+        chunk_overlap=500
+    )
+    chunks = text_splitter.split_text(merged_text)
+    
+    chunk_summaries = []
+    for i, chunk in enumerate(chunks):
+        map_prompt = f"""
+Summarize the following section of a video transcript. Include the key points, topics discussed, and retain the timestamp references where useful.
+
+Transcript Section:
+{chunk}
+"""
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=map_prompt,
+            config={"temperature": 0.3}
+        )
+        chunk_summaries.append(response.text.strip())
+        
+    combined_summaries = "\n\n--- Next Section ---\n\n".join(chunk_summaries)
+    reduce_prompt = f"""
+You are provided with chronological summaries of different sections of a video.
+Create a comprehensive, cohesive, and structured final summary of the entire video.
+Use headings and bullet points where appropriate, and include key timestamp references.
+
+Chronological Segment Summaries:
+{combined_summaries}
+"""
+    final_response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=reduce_prompt,
+        config={"temperature": 0.5}
+    )
+    return final_response.text
+
 def process_query(video_id: str, query: str) -> str:
+    filter_msg = rule_based_filter(query)
+    if filter_msg:
+        return filter_msg
+        
+    intent = classify_intent(client, query)
+    if intent == "SUMMARY":
+        try:
+            return map_reduce_summary(video_id)
+        except Exception as e:
+            print("Error generating summary:", e)
+            return "An error occurred while generating the video summary."
+
     collection_name = f"video_{video_id.replace('-', '_')}"
     query_embedding = client.models.embed_content(
         model="models/gemini-embedding-001",
@@ -312,12 +384,13 @@ def process_query(video_id: str, query: str) -> str:
         print("results", results)
     except Exception as e:
         print(f"Qdrant search error: {e}")
-        # Fallback to empty results if collection doesn't exist or other error
         results = []
     
-    docs, metas = filter_chunks(results, threshold=0.6) # Similarity threshold for Qdrant
+    docs, metas = filter_chunks(results, threshold=0.6)
     
-    # Sort chunks chronologically before merging to fix timestamp issues
+    if not docs:
+        return "The video doesn't contain information about that topic."
+        
     pairs = sorted(zip(docs, metas), key=lambda x: x[1]['start'])
     if pairs:
         docs, metas = zip(*pairs)
@@ -328,15 +401,6 @@ def process_query(video_id: str, query: str) -> str:
     # Reranking is disabled to avoid 429 rate limits and improve latency
     # docs, metas = rerank_chunks(query, docs, metas) 
     merged = merge_chunks(docs, metas)
-    
-    def format_timestamp(seconds: float):
-        seconds = int(seconds)
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-        return f"{minutes:02d}:{secs:02d}"
 
     context = "\n\n".join([
         f"{c['text']} (from {format_timestamp(c['start'])} to {format_timestamp(c['end'])})"
