@@ -8,7 +8,7 @@ from upstash_redis import Redis
 from utils.youtube import get_transcript
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from rag.router import rule_based_filter, classify_intent
+from rag.router import rule_based_filter, classify_intent, rewrite_query
 load_dotenv()
 client = genai.Client()
 
@@ -350,7 +350,10 @@ Chronological Segment Summaries:
     )
     return final_response.text
 
-def process_query(video_id: str, query: str) -> str:
+def process_query(video_id: str, query: str, chat_history: list = None) -> str:
+    if chat_history is None:
+        chat_history = []
+        
     filter_msg = rule_based_filter(query)
     if filter_msg:
         return filter_msg
@@ -363,10 +366,14 @@ def process_query(video_id: str, query: str) -> str:
             print("Error generating summary:", e)
             return "An error occurred while generating the video summary."
 
+    search_query = query
+    if chat_history:
+        search_query = rewrite_query(client, query, chat_history)
+
     collection_name = f"video_{video_id.replace('-', '_')}"
     query_embedding = client.models.embed_content(
         model="models/gemini-embedding-001",
-        contents=query,
+        contents=search_query,
         config={
             "task_type": "RETRIEVAL_QUERY"
         }
@@ -407,11 +414,20 @@ def process_query(video_id: str, query: str) -> str:
         for c in merged
     ])
     
+    chat_history_str = ""
+    if chat_history:
+        formatted = []
+        for msg in chat_history[-6:]:
+            role = msg.role if hasattr(msg, 'role') else (msg.get('role', 'User') if isinstance(msg, dict) else 'User')
+            content = msg.content if hasattr(msg, 'content') else (msg.get('content', '') if isinstance(msg, dict) else str(msg))
+            formatted.append(f"{role.capitalize()}: {content}")
+        chat_history_str = "Chat History:\n" + "\n".join(formatted) + "\n\n"
+    
     prompt = f"""
 You are an expert teacher experienced in teaching with more than 20 years. Your task is to answer the user query using the context is provided.
 Only answer the question dont share any other information(your identity, your role, etc.) to user in answer, only provide answer to the query. 
 
-Question:
+{chat_history_str}Question:
 {query}
 
 Context:

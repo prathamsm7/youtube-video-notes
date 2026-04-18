@@ -216,9 +216,19 @@ export default function YouTubeChatPage() {
     setIsTyping(true);
 
     try {
+      // Send the last 6 messages as context for the backend memory rewriter
+      const chatHistory = messages.slice(-6).map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
       const res = await apiFetch("/api/ai/ask", {
         method: "POST",
-        body: JSON.stringify({ question: userMessage, video_id: videoId }),
+        body: JSON.stringify({ 
+          question: userMessage, 
+          video_id: videoId,
+          chat_history: chatHistory
+        }),
       });
 
       const data = await res.json();

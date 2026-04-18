@@ -53,3 +53,40 @@ Query: "{query}"
     except Exception as e:
         print("Intent classification error:", e)
         return "QA" # Fallback to standard flow
+
+def rewrite_query(client, query: str, chat_history: list) -> str:
+    """
+    Rewrites a user query into a standalone search term by resolving pronouns/references 
+    against the provided chat history.
+    """
+    if not chat_history:
+        return query
+    
+    formatted_history = ""
+    for msg in chat_history:
+        role = msg.role if hasattr(msg, 'role') else (msg.get('role', '') if isinstance(msg, dict) else 'User')
+        content = msg.content if hasattr(msg, 'content') else (msg.get('content', '') if isinstance(msg, dict) else str(msg))
+        formatted_history += f"{role.capitalize()}: {content}\n"
+
+    prompt = f"""
+Based on the following chat history, rewrite the user's latest query as a standalone search statement that requires no prior context to understand.
+If the query is already standalone or doesn't need rewriting, output it as-is.
+Do not answer the query, only rewrite it.
+
+Chat History:
+{formatted_history}
+
+Latest Query: {query}
+"""
+    try:
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt,
+            config={
+                "temperature": 0.2, 
+            }
+        )
+        return response.text.strip()
+    except Exception as e:
+        print("Query rewrite error:", e)
+        return query

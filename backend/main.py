@@ -4,6 +4,11 @@ import re
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
+
+class Message(BaseModel):
+    role: str
+    content: str
 
 from rag.service import process_and_store_video, process_query, qdrant_client, get_job_status
 from utils.youtube import get_video_title
@@ -26,6 +31,7 @@ class VideoRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str
     video_id: str
+    chat_history: Optional[List[Message]] = []
 
 def extract_video_id(url: str) -> str:
     match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11}).*", url)
@@ -75,7 +81,7 @@ async def ask_question(request: AskRequest):
     try:
         # Auth and persistence are now handled by Next.js. 
         # Next.js calls this endpoint independently.
-        answer = process_query(request.video_id, request.question)
+        answer = process_query(request.video_id, request.question, request.chat_history)
         return {
             "question": request.question,
             "answer": answer,
