@@ -15,4 +15,5 @@ dependencies = [
     "notion-client>=2.2.1",
     "tenacity>=8.4.1",
     "upstash-redis>=1.0.0",
+    "langchain-text-splitters>=0.2.0",
 ]
