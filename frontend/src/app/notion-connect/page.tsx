@@ -90,7 +90,7 @@ function NotionConnectPageContent() {
           setStatus("error");
           setErrorMessage(data.error ?? "Failed to connect Notion. Please try again.");
         }
-      } catch (err) {
+      } catch {
         if (cancelled) return;
         setStatus("error");
         setErrorMessage("A network error occurred. Please try again.");
