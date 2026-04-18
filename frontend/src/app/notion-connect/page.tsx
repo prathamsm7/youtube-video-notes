@@ -52,7 +52,7 @@ const features = [
   },
 ];
 
-export default function NotionConnectPage() {
+function NotionConnectPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -187,5 +187,13 @@ export default function NotionConnectPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function NotionConnectPage() {
+  return (
+    <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center p-4"><Loader2 className="w-12 h-12 text-indigo-400 animate-spin" /></div>}>
+      <NotionConnectPageContent />
+    </React.Suspense>
   );
 }
