@@ -1,4 +1,6 @@
 import re
+from utils.ai_handler import generate_with_fallback
+
 
 def rule_based_filter(query: str) -> str | None:
     """
@@ -39,15 +41,14 @@ Output ONLY the exact category name in uppercase.
 Query: "{query}"
 """
     try:
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt,
-            config={
-                "temperature": 0,
-            }
+        intent = generate_with_fallback(
+            client=client,
+            prompt=prompt,
+            primary_model="gemini-3.1-flash-lite-preview",
+            fallback_model="gemini-2.5-flash-lite",
+            config={"temperature": 0}
         )
-        intent = response.text.strip().upper()
-        if "SUMMARY" in intent:
+        if "SUMMARY" in intent.upper():
             return "SUMMARY"
         return "QA"
     except Exception as e:
@@ -79,14 +80,13 @@ Chat History:
 Latest Query: {query}
 """
     try:
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt,
-            config={
-                "temperature": 0.2, 
-            }
+        return generate_with_fallback(
+            client=client,
+            prompt=prompt,
+            primary_model="gemini-3.1-flash-lite-preview",
+            fallback_model="gemini-2.5-flash-lite",
+            config={"temperature": 0.2}
         )
-        return response.text.strip()
     except Exception as e:
         print("Query rewrite error:", e)
         return query

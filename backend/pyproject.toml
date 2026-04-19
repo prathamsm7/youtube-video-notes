@@ -16,4 +16,5 @@ dependencies = [
     "tenacity>=8.4.1",
     "upstash-redis>=1.0.0",
     "langchain-text-splitters>=0.2.0",
+    "google-api-core",
 ]

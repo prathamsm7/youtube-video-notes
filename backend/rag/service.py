@@ -9,6 +9,7 @@ from utils.youtube import get_transcript
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rag.router import rule_based_filter, classify_intent, rewrite_query
+from utils.ai_handler import generate_with_fallback
 load_dotenv()
 client = genai.Client()
 
@@ -327,12 +328,14 @@ Summarize the following section of a video transcript. Include the key points, t
 Transcript Section:
 {chunk}
 """
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=map_prompt,
+        summary = generate_with_fallback(
+            client=client,
+            prompt=map_prompt,
+            primary_model="gemini-3.1-flash-lite-preview",
+            fallback_model="gemini-2.5-flash",
             config={"temperature": 0.3}
         )
-        chunk_summaries.append(response.text.strip())
+        chunk_summaries.append(summary)
         
     combined_summaries = "\n\n--- Next Section ---\n\n".join(chunk_summaries)
     reduce_prompt = f"""
@@ -343,12 +346,13 @@ Use headings and bullet points where appropriate, and include key timestamp refe
 Chronological Segment Summaries:
 {combined_summaries}
 """
-    final_response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=reduce_prompt,
+    return generate_with_fallback(
+        client=client,
+        prompt=reduce_prompt,
+        primary_model="gemini-3.1-flash-lite-preview",
+        fallback_model="gemini-2.5-flash",
         config={"temperature": 0.5}
     )
-    return final_response.text
 
 def process_query(video_id: str, query: str, chat_history: list = None) -> str:
     if chat_history is None:
@@ -448,11 +452,10 @@ Format:
 - Add explanation under each point
 - Include timestamps where relevant
 """
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt,
-        config={
-            "temperature": 0.5,
-        }
+    return generate_with_fallback(
+        client=client,
+        prompt=prompt,
+        primary_model="gemini-3-flash-preview",
+        fallback_model="gemini-2.5-pro",
+        config={"temperature": 0.5}
     )
-    return response.text
