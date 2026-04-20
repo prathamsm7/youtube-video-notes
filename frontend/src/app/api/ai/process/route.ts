@@ -15,11 +15,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: "PYTHON_BACKEND_URL not configured" }, { status: 500 });
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     const response = await fetch(`${PYTHON_BACKEND_URL}/process_video`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });

@@ -5,7 +5,7 @@ def get_video_title(video_id: str) -> str:
     """Fetch video title using YouTube oEmbed API."""
     try:
         url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-        response = requests.get(url)
+        response = requests.get(url, timeout=3)
         if response.status_code == 200:
             return response.json().get("title", f"Video {video_id}")
     except Exception:
