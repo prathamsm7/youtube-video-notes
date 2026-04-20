@@ -61,3 +61,37 @@ def generate_with_fallback(client, prompt: str, primary_model: str, fallback_mod
         except Exception as e_final:
             logger.error(f"Critical: Both Primary and Fallback LLMs failed. Final Error: {str(e_final)}")
             raise e_final
+
+def stream_with_fallback(client, prompt: str, primary_model: str, fallback_model: str, config: dict = None):
+    """
+    Executes an LLM generation call, streaming the output, with an automatic model fallback.
+    We don't retry streams dynamically, we rely on immediate fallback if the initial connection fails.
+    """
+    if config is None:
+        config = {"temperature": 0.5}
+
+    def _safe_stream(model_name: str):
+        response = client.models.generate_content_stream(
+            model=model_name,
+            contents=prompt,
+            config=config
+        )
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+
+    try:
+        logger.info(f"Attempting Primary LLM Stream: {primary_model}")
+        stream = _safe_stream(primary_model)
+        # Try to explicitly pull the first chunk to catch any immediate errors
+        first_chunk = next(stream)
+        yield first_chunk
+        yield from stream
+    except Exception as e:
+        logger.warning(f"Primary LLM Stream ({primary_model}) failed: {str(e)}. Switching to Fallback: {fallback_model}")
+        try:
+            stream = _safe_stream(fallback_model)
+            yield from stream
+        except Exception as e_final:
+            logger.error(f"Critical: Both Primary and Fallback LLM Streams failed. Final Error: {str(e_final)}")
+            yield f"Error: Unable to generate response. Please try again."

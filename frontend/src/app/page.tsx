@@ -155,17 +155,18 @@ export default function YouTubeChatPage() {
   };
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    if (jobPhase === "idle" || jobPhase === "completed" || jobPhase === "failed" || !videoId) return;
 
-    const checkStatus = async () => {
-      if (!videoId || jobPhase === "completed" || jobPhase === "failed" || jobPhase === "idle") return;
+    // Use the environment variable, convert http(s) to ws(s)
+    let wsBase = process.env.NEXT_PUBLIC_WS_BACKEND_URL || "ws://localhost:8000";
+    if (wsBase.startsWith("http")) {
+      wsBase = wsBase.replace(/^http/, "ws");
+    }
+    const ws = new WebSocket(`${wsBase}/ws/status/${videoId}`);
 
+    ws.onmessage = (event) => {
       try {
-        const res = await apiFetch(`/api/ai/status/${videoId}`);
-        if (!res.ok) return;
-
-        const data = await res.json();
-        
+        const data = JSON.parse(event.data);
         if (data.status) {
           setJobPhase(data.status as JobStatus);
           
@@ -182,26 +183,26 @@ export default function YouTubeChatPage() {
                 content: "I've successfully transcribed and analyzed the video! What would you like to know about it?",
               },
             ]);
-            clearInterval(interval);
+            ws.close();
           } else if (data.status === "failed") {
             setIsProcessing(false);
             setError(`Failed during ${jobPhase}: ${data.error || "Unknown error"}`);
-            clearInterval(interval);
+            ws.close();
           }
         }
       } catch (error) {
-        console.error("Failed to poll status", error);
+        console.error("WebSocket payload error:", error);
       }
     };
 
-    if (jobPhase !== "idle" && jobPhase !== "completed" && jobPhase !== "failed" && videoId) {
-      interval = setInterval(checkStatus, 5000);
-    }
+    ws.onerror = (err) => {
+      console.error("WebSocket error", err);
+    };
 
     return () => {
-      if (interval) clearInterval(interval);
+      ws.close();
     };
-  }, [videoId, jobPhase, apiFetch]);
+  }, [videoId, jobPhase]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,16 +232,36 @@ export default function YouTubeChatPage() {
         }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.detail || "Failed to get an answer.");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to get an answer.");
       }
 
+      setIsTyping(false); // Stop typing dots, stream is starting
+
+      const assistantMsgId = Date.now().toString();
       setMessages((prev) => [
         ...prev,
-        { id: Date.now().toString(), role: "assistant", content: data.answer },
+        { id: assistantMsgId, role: "assistant", content: "" },
       ]);
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+
+      if (reader) {
+        let accumulatingContent = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          accumulatingContent += chunk;
+          
+          // Update the specific message with accumulated content
+          setMessages((prev) => prev.map(msg => 
+            msg.id === assistantMsgId ? { ...msg, content: accumulatingContent } : msg
+          ));
+        }
+      }
     } catch (err: unknown) {
       const msgText = err instanceof Error ? err.message : "An unknown error occurred";
       setMessages((prev) => [

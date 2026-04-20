@@ -1,8 +1,10 @@
 import re
 
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import asyncio
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -81,15 +83,46 @@ async def ask_question(request: AskRequest):
     try:
         # Auth and persistence are now handled by Next.js. 
         # Next.js calls this endpoint independently.
-        answer = process_query(request.video_id, request.question, request.chat_history)
-        return {
-            "question": request.question,
-            "answer": answer,
-            "status": "success"
-        }
+        result = process_query(request.video_id, request.question, request.chat_history)
+        
+        def iter_result():
+            if isinstance(result, str):
+                yield result
+            else:
+                for chunk in result:
+                    yield chunk
+
+        return StreamingResponse(iter_result(), media_type="text/plain")
     except Exception as e:
         print(f"Error answering question: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.websocket("/ws/status/{video_id}")
+async def websocket_status(websocket: WebSocket, video_id: str):
+    await websocket.accept()
+    try:
+        last_status = None
+        while True:
+            current_status = get_job_status(video_id)
+            if current_status and current_status != last_status:
+                await websocket.send_json(current_status)
+                last_status = current_status
+                
+                # Close connection if job is fully done or failed
+                status_str = current_status.get("status")
+                if status_str in ["completed", "failed"]:
+                    break
+                    
+            await asyncio.sleep(1) # Poll every 1 second server-side
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for {video_id}")
+    except Exception as e:
+        print(f"WebSocket error for {video_id}: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     import uvicorn

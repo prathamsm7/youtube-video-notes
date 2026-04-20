@@ -9,7 +9,7 @@ from utils.youtube import get_transcript
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rag.router import rule_based_filter, classify_intent, rewrite_query
-from utils.ai_handler import generate_with_fallback
+from utils.ai_handler import generate_with_fallback, stream_with_fallback
 load_dotenv()
 client = genai.Client()
 
@@ -452,7 +452,7 @@ Format:
 - Add explanation under each point
 - Include timestamps where relevant
 """
-    return generate_with_fallback(
+    return stream_with_fallback(
         client=client,
         prompt=prompt,
         primary_model="gemini-3-flash-preview",

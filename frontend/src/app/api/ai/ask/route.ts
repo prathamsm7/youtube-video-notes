@@ -24,8 +24,16 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify(body),
     });
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    if (!response.ok) {
+        const text = await response.text();
+        return NextResponse.json({ detail: "AI Backend error", error: text }, { status: response.status });
+    }
+
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+    });
   } catch (error) {
     const err = error as Error;
     console.error("AI Ask Proxy Error:", err);
