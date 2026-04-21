@@ -194,58 +194,66 @@ def fetch_embeddings_with_retry(batch_texts):
 
 def process_and_store_video(video_id: str, batch_size: int = 100):
     """Fetches transcript, chunks it, embeds it and stores it securely."""
-    update_job_status(video_id, "extracting")
-    transcript = get_transcript(video_id)
-    
-    update_job_status(video_id, "chunking")
-    chunks = semantic_chunk_transcript(transcript)
-    collection_name = f"video_{video_id.replace('-', '_')}" 
-    
-    update_job_status(video_id, "embedding", len(chunks), 0)
+    try:
+        update_job_status(video_id, "extracting")
+        transcript = get_transcript(video_id)
+        
+        update_job_status(video_id, "chunking")
+        chunks = semantic_chunk_transcript(transcript)
+        collection_name = f"video_{video_id.replace('-', '_')}" 
+        
+        update_job_status(video_id, "embedding", len(chunks), 0)
 
-    # Ensure collection exists
-    if not qdrant_client.collection_exists(collection_name=collection_name):
-        qdrant_client.create_collection(
-            collection_name=collection_name,
-            vectors_config=models.VectorParams(size=3072, distance=models.Distance.COSINE),
-        )
-        
-    existing_count = qdrant_client.count(collection_name=collection_name).count
-    if existing_count >= len(chunks):
-        update_job_status(video_id, "completed", len(chunks), existing_count)
-        return True
-        
-    for i in range(existing_count, len(chunks), batch_size):
-        batch_chunks = chunks[i:i + batch_size]
-        texts = [c["text"] for c in batch_chunks]
-        
-        try:
-            embeddings = fetch_embeddings_with_retry(texts)
-            points = [
-                models.PointStruct(
-                    id=i + j,
-                    vector=emb,
-                    payload={
-                        "text": batch_chunks[j]["text"],
-                        "start": batch_chunks[j]["start"],
-                        "end": batch_chunks[j]["end"]
-                    }
-                ) for j, emb in enumerate(embeddings)
-            ]
-            
-            qdrant_client.upload_points(
+        # Ensure collection exists
+        if not qdrant_client.collection_exists(collection_name=collection_name):
+            qdrant_client.create_collection(
                 collection_name=collection_name,
-                points=points,
-                wait=True
+                vectors_config=models.VectorParams(size=3072, distance=models.Distance.COSINE),
             )
-            update_job_status(video_id, "processing", len(chunks), i + len(batch_chunks))
-        except Exception as e:
-            print(f"Failed to process batch at {i}: {e}")
-            update_job_status(video_id, "failed", len(chunks), i, str(e))
-            return False # Stop processing this video
             
-    update_job_status(video_id, "completed", len(chunks), len(chunks))
-    return True
+        existing_count = qdrant_client.count(collection_name=collection_name).count
+        if existing_count >= len(chunks):
+            update_job_status(video_id, "completed", len(chunks), existing_count)
+            return True
+            
+        for i in range(existing_count, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            texts = [c["text"] for c in batch_chunks]
+            
+            try:
+                embeddings = fetch_embeddings_with_retry(texts)
+                points = [
+                    models.PointStruct(
+                        id=i + j,
+                        vector=emb,
+                        payload={
+                            "text": batch_chunks[j]["text"],
+                            "start": batch_chunks[j]["start"],
+                            "end": batch_chunks[j]["end"]
+                        }
+                    ) for j, emb in enumerate(embeddings)
+                ]
+                
+                qdrant_client.upload_points(
+                    collection_name=collection_name,
+                    points=points,
+                    wait=True
+                )
+                update_job_status(video_id, "processing", len(chunks), i + len(batch_chunks))
+            except Exception as e:
+                print(f"Failed to process batch at {i}: {e}")
+                update_job_status(video_id, "failed", len(chunks), i, str(e))
+                return False # Stop processing this video
+                
+        update_job_status(video_id, "completed", len(chunks), len(chunks))
+        return True
+
+    except Exception as e:
+        # Catch ALL unhandled errors (YouTube blocks, network failures, etc.)
+        # and always update Redis so the WebSocket can exit cleanly
+        print(f"Critical failure in background task for {video_id}: {e}")
+        update_job_status(video_id, "failed", error=str(e))
+        return False
 
 def filter_chunks(results, threshold=0.7):
     """

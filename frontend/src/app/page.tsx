@@ -155,21 +155,20 @@ export default function YouTubeChatPage() {
   };
 
   useEffect(() => {
-    if (jobPhase === "idle" || jobPhase === "completed" || jobPhase === "failed" || !videoId) return;
+    let interval: NodeJS.Timeout;
 
-    // Use the environment variable, convert http(s) to ws(s)
-    let wsBase = process.env.NEXT_PUBLIC_WS_BACKEND_URL || "ws://localhost:8000";
-    if (wsBase.startsWith("http")) {
-      wsBase = wsBase.replace(/^http/, "ws");
-    }
-    const ws = new WebSocket(`${wsBase}/ws/status/${videoId}`);
+    const checkStatus = async () => {
+      if (!videoId || jobPhase === "completed" || jobPhase === "failed" || jobPhase === "idle") return;
 
-    ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
+        const res = await apiFetch(`/api/ai/status/${videoId}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+
         if (data.status) {
           setJobPhase(data.status as JobStatus);
-          
+
           if (data.total_chunks) {
             setProgress({ processed: data.processed_chunks || 0, total: data.total_chunks });
           }
@@ -183,26 +182,26 @@ export default function YouTubeChatPage() {
                 content: "I've successfully transcribed and analyzed the video! What would you like to know about it?",
               },
             ]);
-            ws.close();
+            clearInterval(interval);
           } else if (data.status === "failed") {
             setIsProcessing(false);
-            setError(`Failed during ${jobPhase}: ${data.error || "Unknown error"}`);
-            ws.close();
+            setError(`Processing failed: ${data.error || "Unknown error"}`);
+            clearInterval(interval);
           }
         }
       } catch (error) {
-        console.error("WebSocket payload error:", error);
+        console.error("Failed to poll status", error);
       }
     };
 
-    ws.onerror = (err) => {
-      console.error("WebSocket error", err);
-    };
+    if (jobPhase !== "idle" && jobPhase !== "completed" && jobPhase !== "failed" && videoId) {
+      interval = setInterval(checkStatus, 5000);
+    }
 
     return () => {
-      ws.close();
+      if (interval) clearInterval(interval);
     };
-  }, [videoId, jobPhase]);
+  }, [videoId, jobPhase, apiFetch]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
