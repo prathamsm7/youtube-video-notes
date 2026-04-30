@@ -21,7 +21,7 @@ def generate_with_fallback(client, prompt: str, primary_model: str, fallback_mod
         The generated text content.
     """
     if config is None:
-        config = {"temperature": 0.5}
+        config = {"temperature": 0.2}
 
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),

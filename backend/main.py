@@ -1,4 +1,5 @@
 import re
+import logging
 
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -6,6 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class Message(BaseModel):
     role: str
@@ -67,8 +72,11 @@ async def process_video(request: VideoRequest, background_tasks: BackgroundTasks
             "message": "Processing started in background."
         }
     except Exception as e:
-        print(f"Error starting video process: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Error starting video process for {request.youtube_url}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to start video processing. Please check the URL and try again."
+        )
 
 @app.get("/status/{video_id}")
 async def check_status(video_id: str):
@@ -93,8 +101,11 @@ async def ask_question(request: AskRequest):
 
         return StreamingResponse(iter_result(), media_type="text/plain")
     except Exception as e:
-        print(f"Error answering question: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Error answering question for video {request.video_id}")
+        raise HTTPException(
+            status_code=500, 
+            detail="An error occurred while generating the response. Please try again."
+        )
 
 if __name__ == "__main__":
     import uvicorn

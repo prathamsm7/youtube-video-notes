@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from google import genai
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
@@ -12,6 +13,8 @@ from rag.router import rule_based_filter, classify_intent, rewrite_query
 from utils.ai_handler import generate_with_fallback, stream_with_fallback
 load_dotenv()
 client = genai.Client()
+
+logger = logging.getLogger(__name__)
 
 REDIS_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
@@ -241,8 +244,8 @@ def process_and_store_video(video_id: str, batch_size: int = 100):
                 )
                 update_job_status(video_id, "processing", len(chunks), i + len(batch_chunks))
             except Exception as e:
-                print(f"Failed to process batch at {i}: {e}")
-                update_job_status(video_id, "failed", len(chunks), i, str(e))
+                logger.exception(f"Failed to process batch at {i} for video {video_id}")
+                update_job_status(video_id, "failed", len(chunks), i, "An error occurred during embedding processing.")
                 return False # Stop processing this video
                 
         update_job_status(video_id, "completed", len(chunks), len(chunks))
@@ -251,8 +254,14 @@ def process_and_store_video(video_id: str, batch_size: int = 100):
     except Exception as e:
         # Catch ALL unhandled errors (YouTube blocks, network failures, etc.)
         # and always update Redis so the WebSocket can exit cleanly
-        print(f"Critical failure in background task for {video_id}: {e}")
-        update_job_status(video_id, "failed", error=str(e))
+        logger.exception(f"Critical failure in background task for {video_id}")
+        
+        # Provide more specific generic messages if possible
+        error_msg = "Failed to process the video. Please ensure it has captions and try again."
+        if "transcript" in str(e).lower():
+            error_msg = "Could not retrieve transcript. The video might not have captions or is restricted."
+            
+        update_job_status(video_id, "failed", error=error_msg)
         return False
 
 def filter_chunks(results, threshold=0.7):
