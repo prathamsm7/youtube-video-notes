@@ -1,5 +1,7 @@
+import os
 import requests
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
+from youtube_transcript_api.proxies import GenericProxyConfig
 
 def get_video_title(video_id: str) -> str:
     """Fetch video title using YouTube oEmbed API."""
@@ -14,7 +16,17 @@ def get_video_title(video_id: str) -> str:
 
 def get_transcript(video_id: str) -> list[dict]:
     """Robust transcript fetch: prefer en/en-US, else fallback to any."""
-    ytt_api = YouTubeTranscriptApi()
+    proxy_url = os.environ.get("YOUTUBE_PROXY")
+    
+    if proxy_url:
+        proxy_config = GenericProxyConfig(
+            http_url=proxy_url,
+            https_url=proxy_url
+        )
+        ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
+    else:
+        ytt_api = YouTubeTranscriptApi()
+        
     transcript_list = ytt_api.list(video_id)
 
     try:
