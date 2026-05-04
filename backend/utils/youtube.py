@@ -1,7 +1,7 @@
 import os
 import requests
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
-from youtube_transcript_api.proxies import GenericProxyConfig
+from youtube_transcript_api.proxies import WebshareProxyConfig
 
 def get_video_title(video_id: str) -> str:
     """Fetch video title using YouTube oEmbed API."""
@@ -15,18 +15,25 @@ def get_video_title(video_id: str) -> str:
     return f"Video {video_id}"
 
 def get_transcript(video_id: str) -> list[dict]:
-    """Robust transcript fetch: prefer en/en-US, else fallback to any."""
-    proxy_url = os.environ.get("YOUTUBE_PROXY")
+    """Robust transcript fetch: prefer en/en-US, else fallback to any.
     
-    if proxy_url:
-        proxy_config = GenericProxyConfig(
-            http_url=proxy_url,
-            https_url=proxy_url
+    Uses WebshareProxyConfig if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD
+    are set, which enables rotating residential IPs and auto-retry on IP blocks.
+    """
+    proxy_username = os.environ.get("WEBSHARE_PROXY_USERNAME")
+    proxy_password = os.environ.get("WEBSHARE_PROXY_PASSWORD")
+
+    if proxy_username and proxy_password:
+        # WebshareProxyConfig uses rotating residential IPs and retries up to 10x
+        # when blocked — far more reliable than a static/generic proxy.
+        proxy_config = WebshareProxyConfig(
+            proxy_username=proxy_username,
+            proxy_password=proxy_password,
         )
         ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
     else:
         ytt_api = YouTubeTranscriptApi()
-        
+
     transcript_list = ytt_api.list(video_id)
 
     try:
@@ -44,8 +51,8 @@ def get_transcript(video_id: str) -> list[dict]:
         start = snippet["start"] if isinstance(snippet, dict) else snippet.start
         duration = snippet["duration"] if isinstance(snippet, dict) else snippet.duration
         full_transcript.append({
-            "text": text, 
-            "start": start, 
+            "text": text,
+            "start": start,
             "end": start + duration
         })
     return full_transcript
