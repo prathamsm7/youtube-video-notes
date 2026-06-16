@@ -68,7 +68,7 @@ def stream_with_fallback(client, prompt: str, primary_model: str, fallback_model
     We don't retry streams dynamically, we rely on immediate fallback if the initial connection fails.
     """
     if config is None:
-        config = {"temperature": 0.5}
+        config = {"temperature": 0.1}
 
     def _safe_stream(model_name: str):
         response = client.models.generate_content_stream(

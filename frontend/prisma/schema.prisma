@@ -13,6 +13,7 @@ model User {
   hashedPassword String
   createdAt      DateTime        @default(now())
   notionProfiles NotionProfile[]
+  chats          Chat[]
 }
 
 model NotionProfile {
@@ -23,4 +24,57 @@ model NotionProfile {
   workspaceId   String?
   workspaceName String?
   botId         String?
+}
+
+enum VideoStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Video {
+  id                  String      @id @default(cuid())
+  youtubeId           String      @unique
+  title               String?
+  url                 String?
+  status              VideoStatus @default(PENDING)
+  totalChunks         Int?
+  summary             String?     @db.Text
+  summaryGeneratedAt  DateTime?
+  errorMessage        String?
+  processedAt         DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  chats               Chat[]
+}
+
+model Chat {
+  id        String    @id @default(cuid())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  videoId   String
+  video     Video     @relation(fields: [videoId], references: [id])
+  title     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+
+  @@index([userId, updatedAt])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  chatId    String
+  chat      Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role      MessageRole
+  content   String      @db.Text
+  createdAt DateTime    @default(now())
+
+  @@index([chatId, createdAt])
 }

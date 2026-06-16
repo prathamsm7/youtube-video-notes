@@ -1,28 +1,21 @@
-import re
+import json
 import logging
+import re
 
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 
-# Configure logging
+from utils.youtube import get_video_title
+from workflows.runner import run_query, stream_ingest_events
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class Message(BaseModel):
-    role: str
-    content: str
+app = FastAPI(title="YouTube RAG (LangGraph Workflows)")
 
-from rag.service import process_and_store_video, process_query, qdrant_client, get_job_status
-from utils.youtube import get_video_title
-
-app = FastAPI(title="YouTube RAG (AI Focused)")
-
-# In the new architecture, only Next.js calls Python. 
-# We specify the Next.js server as the only allowed origin if we want strict security.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:3001"],
@@ -31,82 +24,94 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class Message(BaseModel):
+    role: str
+    content: str
+
+
 class VideoRequest(BaseModel):
     youtube_url: str
+
 
 class AskRequest(BaseModel):
     question: str
     video_id: str
     chat_history: Optional[List[Message]] = []
+    cached_summary: Optional[str] = None
+
 
 def extract_video_id(url: str) -> str:
     match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11}).*", url)
     return match.group(1) if match else url
 
-@app.post("/process_video")
-async def process_video(request: VideoRequest, background_tasks: BackgroundTasks):
+
+@app.post("/process_video/stream")
+async def process_video_stream(request: VideoRequest):
+    """Stream ingest workflow progress via Server-Sent Events."""
     try:
         video_id = extract_video_id(request.youtube_url)
         title = get_video_title(video_id)
-        
-        # Check if already fully processed
-        try:
-            job_status = get_job_status(video_id)
-            if job_status and job_status.get("status") == "completed":
-                return {
-                    "status": "success", 
-                    "video_id": video_id, 
-                    "title": title,
-                    "message": "Already processed"
-                }
-        except Exception:
-            pass 
-        
-        # Send processing to the background immediately to avoid timeout
-        background_tasks.add_task(process_and_store_video, video_id)
-        
-        return {
-            "status": "processing_started", 
-            "video_id": video_id, 
-            "title": title,
-            "message": "Processing started in background."
-        }
-    except Exception as e:
-        logger.exception(f"Error starting video process for {request.youtube_url}")
+
+        def event_stream():
+            yield f"data: {json.dumps({'type': 'started', 'video_id': video_id, 'title': title})}\n\n"
+            try:
+                for event in stream_ingest_events(video_id):
+                    yield event
+            except Exception:
+                logger.exception("Ingest workflow failed for %s", video_id)
+                yield f"data: {json.dumps({'type': 'error', 'video_id': video_id, 'error': 'Failed to process the video. Please try again.'})}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except Exception:
+        logger.exception("Error starting ingest stream for %s", request.youtube_url)
         raise HTTPException(
-            status_code=500, 
-            detail="Failed to start video processing. Please check the URL and try again."
+            status_code=500,
+            detail="Failed to start video processing. Please check the URL and try again.",
         )
 
-@app.get("/status/{video_id}")
-async def check_status(video_id: str):
-    job_status = get_job_status(video_id)
-    if not job_status:
-        return {"status": "unknown", "message": "No job found. It may be expired or never started."}
-    return job_status
 
 @app.post("/ask")
 async def ask_question(request: AskRequest):
     try:
-        # Auth and persistence are now handled by Next.js. 
-        # Next.js calls this endpoint independently.
-        result = process_query(request.video_id, request.question, request.chat_history)
-        
-        def iter_result():
-            if isinstance(result, str):
-                yield result
-            else:
-                for chunk in result:
-                    yield chunk
-
-        return StreamingResponse(iter_result(), media_type="text/plain")
-    except Exception as e:
-        logger.exception(f"Error answering question for video {request.video_id}")
-        raise HTTPException(
-            status_code=500, 
-            detail="An error occurred while generating the response. Please try again."
+        result = run_query(
+            request.video_id,
+            request.question,
+            request.chat_history,
+            request.cached_summary,
         )
+
+        def iter_result():
+            response_stream = result.get("response_stream")
+            if response_stream is not None:
+                yield from response_stream
+                return
+            yield result.get("response", "")
+
+        headers: dict[str, str] = {}
+        if result.get("intent") == "SUMMARY":
+            headers["X-Response-Type"] = "summary"
+            if result.get("summary_generated"):
+                headers["X-Summary-Generated"] = "true"
+
+        return StreamingResponse(iter_result(), media_type="text/plain", headers=headers)
+    except Exception:
+        logger.exception("Error answering question for video %s", request.video_id)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while generating the response. Please try again.",
+        )
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

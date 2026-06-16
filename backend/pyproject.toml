@@ -1,20 +1,18 @@
 [project]
 name = "youtube-rag"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "YouTube RAG backend with LangGraph workflows"
 requires-python = ">=3.12"
 dependencies = [
-    "openai>=1.0.0",
     "python-dotenv>=1.0.0",
     "google-genai>=1.0.0",
     "fastapi[standard]>=0.100.0",
     "uvicorn>=0.23.0",
     "youtube-transcript-api>=0.6.2",
     "qdrant-client>=1.7.0",
-    "notion-client>=2.2.1",
     "tenacity>=8.4.1",
-    "upstash-redis>=1.0.0",
     "langchain-text-splitters>=0.2.0",
+    "langchain-core>=0.2.0",
+    "langgraph>=0.2.0",
     "google-api-core",
 ]
