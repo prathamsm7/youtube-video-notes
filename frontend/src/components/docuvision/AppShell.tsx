@@ -16,17 +16,27 @@ export function AppShell({
   return (
     <div
       className={cn(
-        "flex flex-col bg-[#030712] text-slate-100 font-sans relative w-full",
-        fixedViewport ? "h-dvh max-h-dvh overflow-hidden" : "min-h-screen",
+        "flex flex-1 flex-col font-sans relative w-full transition-colors duration-300",
+        fixedViewport ? "h-dvh max-h-dvh overflow-hidden" : "min-h-full",
         isDark ? "dark" : "",
       )}
     >
-      <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vh] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vh] bg-violet-600/20 rounded-full blur-[120px] pointer-events-none" />
+      <div
+        className={cn(
+          "absolute top-[-10%] left-[-10%] w-[40vw] h-[40vh] rounded-full blur-[120px] pointer-events-none",
+          isDark ? "bg-blue-600/20" : "bg-blue-400/15",
+        )}
+      />
+      <div
+        className={cn(
+          "absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vh] rounded-full blur-[120px] pointer-events-none",
+          isDark ? "bg-violet-600/20" : "bg-violet-400/15",
+        )}
+      />
       <div
         className={cn(
           "relative z-10 flex flex-col w-full min-h-0",
-          fixedViewport ? "flex-1 h-full overflow-hidden" : "min-h-screen",
+          fixedViewport ? "flex-1 h-full overflow-hidden" : "min-h-full flex-1",
         )}
       >
         {children}

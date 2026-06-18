@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import React, { createContext, useContext, useLayoutEffect, useState, ReactNode } from "react";
 
 interface ThemeContextType {
   isDark: boolean;
@@ -12,7 +12,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [isDark, setIsDark] = useState(true);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isDark) {
       document.documentElement.classList.add("dark");
     } else {
