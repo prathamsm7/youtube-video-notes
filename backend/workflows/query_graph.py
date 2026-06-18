@@ -1,5 +1,6 @@
 import logging
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from clients.gemini import client
@@ -10,6 +11,12 @@ from utils.ai_handler import stream_with_fallback
 from workflows.states import QueryState
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_token(content: str) -> None:
+    writer = get_stream_writer()
+    if writer:
+        writer({"type": "token", "content": content})
 
 
 def _format_chat_history(chat_history: list) -> str:
@@ -36,6 +43,7 @@ def _format_chat_history(chat_history: list) -> str:
 def filter_query(state: QueryState) -> QueryState:
     filter_message = rule_based_filter(state["query"])
     if filter_message:
+        _emit_token(filter_message)
         return {"filter_message": filter_message, "response": filter_message}
     return {"filter_message": None}
 
@@ -60,28 +68,28 @@ def route_after_intent(state: QueryState) -> str:
 def summarize_video(state: QueryState) -> QueryState:
     cached = (state.get("cached_summary") or "").strip()
     if cached:
-        return {"response": cached}
+        _emit_token(cached)
+        return {"response": cached, "intent": "SUMMARY"}
 
     try:
         summary = map_reduce_summary(state["video_id"])
-        return {"response": summary, "summary_generated": True}
+        _emit_token(summary)
+        return {"response": summary, "intent": "SUMMARY", "summary_generated": True}
     except Exception as exc:
         logger.exception("Error generating summary for %s", state["video_id"])
-        return {
-            "response": "An error occurred while generating the video summary.",
-            "error": str(exc),
-        }
+        message = "An error occurred while generating the video summary."
+        _emit_token(message)
+        return {"response": message, "intent": "SUMMARY", "error": str(exc)}
 
 
 def prepare_rag(state: QueryState) -> QueryState:
     search_query = state.get("search_query") or state["query"]
 
-    context = retrieve_context(state["video_id"], search_query)
+    context = retrieve_context(state["video_id"], search_query, 5)
     if not context:
-        return {
-            "search_query": search_query,
-            "response": "The video doesn't contain information about that topic.",
-        }
+        message = "The video doesn't contain information about that topic."
+        _emit_token(message)
+        return {"search_query": search_query, "response": message}
 
     return {"search_query": search_query, "context": context}
 
@@ -122,14 +130,18 @@ Format:
 - Use bullet points
 - Add explanation under each point
 """
-    response_stream = stream_with_fallback(
+    parts: list[str] = []
+    for chunk in stream_with_fallback(
         client=client,
         prompt=prompt,
         primary_model="gemini-3-flash-preview",
         fallback_model="gemini-2.5-pro",
         config={"temperature": 0.5},
-    )
-    return {"response_stream": response_stream}
+    ):
+        parts.append(chunk)
+        _emit_token(chunk)
+
+    return {"response": "".join(parts), "intent": "QA"}
 
 
 def build_query_graph():

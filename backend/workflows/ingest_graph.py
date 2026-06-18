@@ -69,7 +69,7 @@ def embed_and_store(state: IngestState, batch_size: int = 100) -> IngestState:
         if not qdrant_client.collection_exists(collection_name=collection_name):
             qdrant_client.create_collection(
                 collection_name=collection_name,
-                vectors_config=models.VectorParams(size=3072, distance=models.Distance.COSINE),
+                vectors_config=models.VectorParams(size=1024, distance=models.Distance.COSINE),
             )
 
         existing_count = qdrant_client.count(collection_name=collection_name).count

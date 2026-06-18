@@ -24,6 +24,30 @@ type ChatData = {
   messages: Message[];
 };
 
+type StreamStatus = {
+  phase: string;
+  totalChunks?: number;
+} | null;
+
+function getStreamStatusLabel(status: StreamStatus): string {
+  if (!status) return "";
+
+  switch (status.phase) {
+    case "analyzing":
+      return "Understanding and Analysing question";
+    case "retrieving":
+      return status.totalChunks !== undefined
+        ? `Retrieved ${status.totalChunks} chunks`
+        : "Retrieving chunks...";
+    case "generating":
+      return "Generating Answer";
+    case "summarizing":
+      return "Generating Summary";
+    default:
+      return "";
+  }
+}
+
 export default function ChatPage() {
   const { user, apiFetch, logout, isLoading: authLoading } = useAuth();
   const router = useRouter();
@@ -37,6 +61,8 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [notionConnected, setNotionConnected] = useState(false);
   const [savingToNotion, setSavingToNotion] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>(null);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,7 +90,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+  }, [messages, isTyping, streamStatus]);
 
   useEffect(() => {
     if (!user) return;
@@ -111,6 +137,12 @@ export default function ChatPage() {
     const tempUserId = `temp-${Date.now()}`;
     setMessages((prev) => [...prev, { id: tempUserId, role: "user", content: userMessage }]);
     setIsTyping(true);
+    setStreamStatus(null);
+    setStreamingMessageId(null);
+
+    const assistantId = `temp-${Date.now() + 1}`;
+    let assistantStarted = false;
+    let content = "";
 
     try {
       const res = await apiFetch(`/api/chats/${chatId}/messages`, {
@@ -123,26 +155,80 @@ export default function ChatPage() {
         throw new Error(errData.detail || "Failed to get an answer");
       }
 
-      setIsTyping(false);
-      const assistantId = `temp-${Date.now() + 1}`;
-      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
-
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
-      let content = "";
+      let buffer = "";
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          content += decoder.decode(value, { stream: true });
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content } : m)),
-          );
+      if (!reader) {
+        throw new Error("Streaming not supported");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const rawEvent of events) {
+          const dataLine = rawEvent.split("\n").find((line) => line.startsWith("data: "));
+          if (!dataLine) continue;
+
+          const payload = JSON.parse(dataLine.slice(6)) as {
+            type?: string;
+            phase?: string;
+            total_chunks?: number;
+            content?: string;
+            error?: string;
+          };
+
+          if (payload.type === "started") {
+            setIsTyping(false);
+            assistantStarted = true;
+            setStreamingMessageId(assistantId);
+            setMessages((prev) => [
+              ...prev,
+              { id: assistantId, role: "assistant", content: "" },
+            ]);
+          } else if (payload.type === "status" && payload.phase) {
+            if (!assistantStarted) {
+              setIsTyping(false);
+              assistantStarted = true;
+              setStreamingMessageId(assistantId);
+              setMessages((prev) => [
+                ...prev,
+                { id: assistantId, role: "assistant", content: "" },
+              ]);
+            }
+            setStreamStatus({
+              phase: payload.phase,
+              totalChunks: payload.total_chunks,
+            });
+          } else if (payload.type === "token" && payload.content) {
+            if (!assistantStarted) {
+              setIsTyping(false);
+              assistantStarted = true;
+              setStreamingMessageId(assistantId);
+              setMessages((prev) => [
+                ...prev,
+                { id: assistantId, role: "assistant", content: "" },
+              ]);
+            }
+            setStreamStatus(null);
+            content += payload.content;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content } : m)),
+            );
+          } else if (payload.type === "error") {
+            throw new Error(payload.error || "Failed to generate response");
+          }
         }
       }
 
-      await loadChat();
+      if (!assistantStarted) {
+        setIsTyping(false);
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -154,6 +240,8 @@ export default function ChatPage() {
       ]);
     } finally {
       setIsTyping(false);
+      setStreamStatus(null);
+      setStreamingMessageId(null);
     }
   };
 
@@ -201,7 +289,14 @@ export default function ChatPage() {
                   <p>{msg.content}</p>
                 ) : (
                   <>
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    {!msg.content && streamStatus && msg.id === streamingMessageId ? (
+                      <p className="text-sm text-neutral-400 flex items-center gap-2 m-0">
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        {getStreamStatusLabel(streamStatus)}
+                      </p>
+                    ) : (
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    )}
                     {notionConnected && msg.content && (
                       <button
                         onClick={() => handleSaveToNotion(msg)}

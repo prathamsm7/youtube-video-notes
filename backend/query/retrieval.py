@@ -1,6 +1,6 @@
 import logging
 
-from clients.gemini import client
+from ingestion.embedder import embed_query
 from clients.qdrant import qdrant_client
 
 logger = logging.getLogger(__name__)
@@ -63,16 +63,12 @@ def filter_chunks(results, threshold: float = 0.7) -> list[str]:
 def retrieve_context(video_id: str, search_query: str, limit: int = 10, threshold: float = 0.6) -> str | None:
     collection_name = f"video_{video_id.replace('-', '_')}"
 
-    query_embedding = client.models.embed_content(
-        model="models/gemini-embedding-001",
-        contents=search_query,
-        config={"task_type": "RETRIEVAL_QUERY"},
-    )
+    query_embedding = embed_query(search_query)
 
     try:
         results = qdrant_client.query_points(
             collection_name=collection_name,
-            query=query_embedding.embeddings[0].values,
+            query=query_embedding,
             limit=limit,
             timeout=60,
             score_threshold=threshold,

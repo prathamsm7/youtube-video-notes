@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { VideoStatus } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { createChatWithWelcome } from "@/lib/chats";
+import { sseComment, sseEvent, streamIngestEvents, STREAM_HEADERS } from "@/lib/rag";
 import { extractYoutubeId, fetchYoutubeTitle } from "@/lib/youtube";
 import {
   ensureVideo,
@@ -10,17 +11,18 @@ import {
   setVideoReady,
 } from "@/lib/videos";
 
-function sseEvent(data: Record<string, unknown>) {
-  return `data: ${JSON.stringify(data)}\n\n`;
-}
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-function parseSseData(line: string): Record<string, unknown> | null {
-  if (!line.startsWith("data: ")) return null;
-  try {
-    return JSON.parse(line.slice(6));
-  } catch {
-    return null;
-  }
+async function handleIngestComplete(
+  videoDbId: string,
+  userId: number,
+  title: string,
+  totalChunks: number,
+): Promise<string> {
+  await setVideoReady(videoDbId, totalChunks);
+  const chat = await createChatWithWelcome(userId, videoDbId, title);
+  return chat.id;
 }
 
 export async function POST(req: NextRequest) {
@@ -28,14 +30,6 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return new Response(JSON.stringify({ detail: "Unauthorized" }), {
       status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL;
-  if (!PYTHON_BACKEND_URL) {
-    return new Response(JSON.stringify({ detail: "PYTHON_BACKEND_URL not configured" }), {
-      status: 500,
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -75,91 +69,53 @@ export async function POST(req: NextRequest) {
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+        ...STREAM_HEADERS,
       },
     });
   }
 
   if (video.status === VideoStatus.PROCESSING) {
-    return new Response(JSON.stringify({ detail: "Video is already being processed" }), {
-      status: 409,
-      headers: { "Content-Type": "application/json" },
-    });
+    const stuckMs = Date.now() - video.updatedAt.getTime();
+    if (stuckMs < 120_000) {
+      return new Response(JSON.stringify({ detail: "Video is already being processed" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
-
-  await setVideoProcessing(video.id);
-
-  const pythonRes = await fetch(`${PYTHON_BACKEND_URL}/process_video/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ youtube_url: youtubeUrl }),
-  });
-
-  if (!pythonRes.ok || !pythonRes.body) {
-    await setVideoFailed(video.id, "AI backend failed to start processing");
-    return new Response(JSON.stringify({ detail: "AI Backend error" }), {
-      status: 502,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const reader = pythonRes.body.getReader();
-  const decoder = new TextDecoder();
 
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
-      let buffer = "";
       let chatId: string | null = null;
 
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        controller.enqueue(encoder.encode(sseComment("open")));
+        controller.enqueue(
+          encoder.encode(sseEvent({ type: "started", video_id: youtubeId, title })),
+        );
 
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() || "";
+        await setVideoProcessing(video.id);
 
-          for (const part of parts) {
-            const line = part.split("\n").find((l) => l.startsWith("data: "));
-            if (!line) continue;
-
-            const payload = parseSseData(line);
-            if (!payload) continue;
-
-            if (payload.type === "complete") {
-              const totalChunks = (payload.total_chunks as number) || 0;
-              await setVideoReady(video.id, totalChunks);
-              const chat = await createChatWithWelcome(user.id, video.id, title);
-              chatId = chat.id;
-              payload.chatId = chatId;
-            }
-
-            if (payload.type === "error") {
-              await setVideoFailed(
-                video.id,
-                (payload.error as string) || "Processing failed",
-              );
-            }
-
-            controller.enqueue(encoder.encode(sseEvent(payload)));
+        for await (const event of streamIngestEvents(youtubeId)) {
+          if (event.type === "complete" && !chatId) {
+            chatId = await handleIngestComplete(
+              video.id,
+              user.id,
+              title,
+              event.total_chunks,
+            );
+            controller.enqueue(
+              encoder.encode(sseEvent({ ...event, chatId })),
+            );
+            continue;
           }
-        }
 
-        if (!chatId) {
-          await setVideoReady(video.id, 0);
-          const chat = await createChatWithWelcome(user.id, video.id, title);
-          controller.enqueue(
-            encoder.encode(
-              sseEvent({
-                type: "complete",
-                video_id: youtubeId,
-                title,
-                chatId: chat.id,
-              }),
-            ),
-          );
+          if (event.type === "error") {
+            await setVideoFailed(video.id, event.error);
+          }
+
+          controller.enqueue(encoder.encode(sseEvent(event)));
         }
       } catch (error) {
         console.error("Process stream error:", error);
@@ -178,8 +134,7 @@ export async function POST(req: NextRequest) {
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
+      ...STREAM_HEADERS,
     },
   });
 }

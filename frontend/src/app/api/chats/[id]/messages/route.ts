@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { MessageRole, VideoStatus } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -7,7 +8,26 @@ import {
   saveMessage,
   toApiRole,
 } from "@/lib/chats";
+import { STREAM_HEADERS, sseComment, sseEvent, streamQueryResponse } from "@/lib/rag";
 import { setVideoSummary } from "@/lib/videos";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+async function saveAssistantMessage(
+  chatId: string,
+  videoDbId: string,
+  answer: string,
+  summaryGenerated: boolean,
+) {
+  if (!answer.trim()) {
+    return;
+  }
+  await saveMessage(chatId, MessageRole.ASSISTANT, answer);
+  if (summaryGenerated) {
+    await setVideoSummary(videoDbId, answer);
+  }
+}
 
 export async function POST(
   req: NextRequest,
@@ -37,69 +57,81 @@ export async function POST(
     return NextResponse.json({ detail: "Message cannot be empty" }, { status: 400 });
   }
 
-  const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL;
-  if (!PYTHON_BACKEND_URL) {
-    return NextResponse.json({ detail: "PYTHON_BACKEND_URL not configured" }, { status: 500 });
-  }
-
-  const history = await getRecentMessages(chatId, 6);
-  await saveMessage(chatId, MessageRole.USER, content.trim());
-
-  const chatHistory = history.map((m) => ({
-    role: toApiRole(m.role),
-    content: m.content,
-  }));
-
-  const pythonRes = await fetch(`${PYTHON_BACKEND_URL}/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question: content.trim(),
-      video_id: chat.video.youtubeId,
-      chat_history: chatHistory,
-      cached_summary: chat.video.summary ?? null,
-    }),
-  });
-
-  if (!pythonRes.ok || !pythonRes.body) {
-    return NextResponse.json({ detail: "AI Backend error" }, { status: 502 });
-  }
-
-  const summaryGenerated = pythonRes.headers.get("X-Summary-Generated") === "true";
-
-  const reader = pythonRes.body.getReader();
-  const decoder = new TextDecoder();
+  const question = content.trim();
+  const videoId = chat.video.youtubeId;
+  const videoDbId = chat.video.id;
+  const cachedSummary = chat.video.summary ?? null;
 
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
+      const send = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
+
       let answer = "";
+      let summaryGenerated = false;
 
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          answer += chunk;
-          controller.enqueue(encoder.encode(chunk));
-        }
+        controller.enqueue(encoder.encode(sseComment("open")));
 
-        if (answer.trim()) {
-          await saveMessage(chatId, MessageRole.ASSISTANT, answer);
-          if (summaryGenerated) {
-            await setVideoSummary(chat.video.id, answer);
+        const history = await getRecentMessages(chatId, 6);
+        await saveMessage(chatId, MessageRole.USER, question);
+
+        const chatHistory = history.map((m) => ({
+          role: toApiRole(m.role),
+          content: m.content,
+        }));
+
+        send({ type: "started", question });
+
+        for await (const event of streamQueryResponse(
+          videoId,
+          question,
+          chatHistory,
+          cachedSummary,
+        )) {
+          if (event.kind === "status") {
+            send({
+              type: "status",
+              phase: event.phase,
+              ...(event.total_chunks !== undefined
+                ? { total_chunks: event.total_chunks }
+                : {}),
+            });
+          } else if (event.kind === "token") {
+            answer += event.content;
+            send({ type: "token", content: event.content });
+          } else if (event.kind === "meta") {
+            summaryGenerated = event.payload.summary_generated;
           }
         }
+
+        send({ type: "done" });
+        controller.close();
+
+        after(async () => {
+          try {
+            await saveAssistantMessage(chatId, videoDbId, answer, summaryGenerated);
+          } catch (error) {
+            console.error("Failed to save assistant message:", error);
+          }
+        });
       } catch (error) {
         console.error("Ask stream error:", error);
-        controller.error(error);
-      } finally {
+        send({
+          type: "error",
+          error: error instanceof Error ? error.message : "Failed to generate response",
+        });
         controller.close();
       }
     },
   });
 
   return new Response(stream, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      ...STREAM_HEADERS,
+    },
   });
 }
