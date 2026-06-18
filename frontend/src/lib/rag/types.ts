@@ -5,7 +5,13 @@ export type TranscriptSegment = {
 };
 
 export type TextChunk = {
+  /** Pure text — used for embedding only */
   text: string;
+  /** Timestamp-labeled transcript lines — passed to the LLM */
+  contextText: string;
+  startSeconds: number;
+  endSeconds: number;
+  chunkIndex: number;
 };
 
 export type ChatHistoryMessage = {

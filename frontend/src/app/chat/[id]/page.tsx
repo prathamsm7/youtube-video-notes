@@ -1,11 +1,15 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import { Loader2, Send, Bot, User, Bookmark } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { AppHeader } from "@/components/AppHeader";
+import { useChatList } from "@/context/ChatListContext";
+import { useTheme } from "@/context/ThemeContext";
+import { VideoPlayerProvider } from "@/context/VideoPlayerContext";
+import { AppShell } from "@/components/docuvision/AppShell";
+import { ConversationPage } from "@/components/docuvision/ConversationPage";
+import { ChatMessage, SourceInfo } from "@/types/ui";
 
 type Message = {
   id: string;
@@ -16,12 +20,12 @@ type Message = {
 type ChatData = {
   id: string;
   title: string;
+  updatedAt: string;
   video: {
     youtubeId: string;
     title: string;
     status: string;
   };
-  messages: Message[];
 };
 
 type StreamStatus = {
@@ -34,63 +38,134 @@ function getStreamStatusLabel(status: StreamStatus): string {
 
   switch (status.phase) {
     case "analyzing":
-      return "Understanding and Analysing question";
+      return "Understanding and analysing question";
     case "retrieving":
       return status.totalChunks !== undefined
         ? `Retrieved ${status.totalChunks} chunks`
         : "Retrieving chunks...";
     case "generating":
-      return "Generating Answer";
+      return "Generating answer";
     case "summarizing":
-      return "Generating Summary";
+      return "Generating summary";
     default:
       return "";
   }
 }
 
+function chatFromListItem(item: {
+  id: string;
+  title: string;
+  videoTitle: string;
+  youtubeId: string;
+  videoStatus: string;
+  updatedAt: string;
+}): ChatData {
+  return {
+    id: item.id,
+    title: item.title,
+    updatedAt: item.updatedAt,
+    video: {
+      youtubeId: item.youtubeId,
+      title: item.videoTitle,
+      status: item.videoStatus,
+    },
+  };
+}
+
 export default function ChatPage() {
   const { user, apiFetch, logout, isLoading: authLoading } = useAuth();
+  const { chats, chatsLoading, refreshChats } = useChatList();
+  const { isDark, toggleTheme } = useTheme();
   const router = useRouter();
   const params = useParams();
   const chatId = params.id as string;
 
   const [chat, setChat] = useState<ChatData | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(true);
   const [notionConnected, setNotionConnected] = useState(false);
   const [savingToNotion, setSavingToNotion] = useState<string | null>(null);
-  const [streamStatus, setStreamStatus] = useState<StreamStatus>(null);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const activeChatIdRef = useRef(chatId);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
 
   useEffect(() => {
     if (!authLoading && !user) router.push("/login");
   }, [user, authLoading, router]);
 
-  const loadChat = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/api/chats/${chatId}`);
-      if (!res.ok) {
-        router.push("/");
-        return;
+  const loadMessages = useCallback(
+    async (selectedChatId: string) => {
+      activeChatIdRef.current = selectedChatId;
+      setMessagesLoading(true);
+      setMessages([]);
+
+      const listItem = chatsRef.current.find((c) => c.id === selectedChatId);
+      if (listItem) {
+        setChat(chatFromListItem(listItem));
+      } else {
+        setChat(null);
       }
-      const data = await res.json();
-      setChat(data);
-      setMessages(data.messages);
-    } finally {
-      setLoading(false);
-    }
-  }, [apiFetch, chatId, router]);
+
+      try {
+        const msgRes = await apiFetch(`/api/chats/${selectedChatId}/messages`);
+
+        if (activeChatIdRef.current !== selectedChatId) return;
+
+        if (!msgRes.ok) {
+          if (msgRes.status === 404) {
+            router.push("/");
+          }
+          return;
+        }
+
+        const msgData = await msgRes.json();
+        if (activeChatIdRef.current !== selectedChatId) return;
+
+        setMessages(
+          msgData.messages.map((m: Message) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+          })),
+        );
+
+        if (!listItem) {
+          const metaRes = await apiFetch(`/api/chats/${selectedChatId}`);
+          if (activeChatIdRef.current !== selectedChatId) return;
+          if (metaRes.ok) {
+            const meta = await metaRes.json();
+            setChat({
+              id: meta.id,
+              title: meta.title,
+              updatedAt: meta.updatedAt,
+              video: {
+                youtubeId: meta.video.youtubeId,
+                title: meta.video.title,
+                status: meta.video.status,
+              },
+            });
+          }
+        }
+      } catch {
+        if (activeChatIdRef.current === selectedChatId) {
+          router.push("/");
+        }
+      } finally {
+        if (activeChatIdRef.current === selectedChatId) {
+          setMessagesLoading(false);
+        }
+      }
+    },
+    [apiFetch, router],
+  );
 
   useEffect(() => {
-    if (user && chatId) loadChat();
-  }, [user, chatId, loadChat]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping, streamStatus]);
+    if (!user || !chatId || chatsLoading) return;
+    loadMessages(chatId);
+  }, [user, chatId, chatsLoading, loadMessages]);
 
   useEffect(() => {
     if (!user) return;
@@ -100,7 +175,7 @@ export default function ChatPage() {
       .catch(() => setNotionConnected(false));
   }, [user, apiFetch]);
 
-  const handleSaveToNotion = async (msg: Message) => {
+  const handleSaveToNotion = async (msg: ChatMessage) => {
     if (!chat) return;
     setSavingToNotion(msg.id);
     try {
@@ -128,16 +203,15 @@ export default function ChatPage() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || !chat) return;
+  const handleSendMessage = async (userMessage: string) => {
+    if (!chat || messagesLoading) return;
 
-    const userMessage = input.trim();
-    setInput("");
     const tempUserId = `temp-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: tempUserId, role: "user", content: userMessage }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: tempUserId, role: "user", content: userMessage },
+    ]);
     setIsTyping(true);
-    setStreamStatus(null);
     setStreamingMessageId(null);
 
     const assistantId = `temp-${Date.now() + 1}`;
@@ -159,9 +233,7 @@ export default function ChatPage() {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      if (!reader) {
-        throw new Error("Streaming not supported");
-      }
+      if (!reader) throw new Error("Streaming not supported");
 
       while (true) {
         const { done, value } = await reader.read();
@@ -189,7 +261,7 @@ export default function ChatPage() {
             setStreamingMessageId(assistantId);
             setMessages((prev) => [
               ...prev,
-              { id: assistantId, role: "assistant", content: "" },
+              { id: assistantId, role: "assistant", content: "", streamStatus: undefined },
             ]);
           } else if (payload.type === "status" && payload.phase) {
             if (!assistantStarted) {
@@ -201,10 +273,17 @@ export default function ChatPage() {
                 { id: assistantId, role: "assistant", content: "" },
               ]);
             }
-            setStreamStatus({
+            const status: StreamStatus = {
               phase: payload.phase,
               totalChunks: payload.total_chunks,
-            });
+            };
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, streamStatus: getStreamStatusLabel(status) }
+                  : m,
+              ),
+            );
           } else if (payload.type === "token" && payload.content) {
             if (!assistantStarted) {
               setIsTyping(false);
@@ -215,10 +294,11 @@ export default function ChatPage() {
                 { id: assistantId, role: "assistant", content: "" },
               ]);
             }
-            setStreamStatus(null);
             content += payload.content;
             setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content } : m)),
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content, streamStatus: undefined } : m,
+              ),
             );
           } else if (payload.type === "error") {
             throw new Error(payload.error || "Failed to generate response");
@@ -226,9 +306,8 @@ export default function ChatPage() {
         }
       }
 
-      if (!assistantStarted) {
-        setIsTyping(false);
-      }
+      if (!assistantStarted) setIsTyping(false);
+      await refreshChats();
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -240,118 +319,71 @@ export default function ChatPage() {
       ]);
     } finally {
       setIsTyping(false);
-      setStreamStatus(null);
       setStreamingMessageId(null);
     }
   };
 
-  if (authLoading || loading || !user) {
+  const handleSelectChat = (id: string) => {
+    if (id === chatId) return;
+    router.push(`/chat/${id}`);
+  };
+
+  if (authLoading || !user) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+      <div className="h-dvh bg-[#030712] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-violet-500" />
       </div>
     );
   }
 
-  if (!chat) return null;
+  const sources: SourceInfo[] = chats.map((c) => ({
+    id: c.id,
+    type: "video",
+    title: c.title || c.videoTitle,
+    dateAdded: c.updatedAt,
+  }));
+
+  const listItem = chats.find((c) => c.id === chatId);
+  const activeSource: SourceInfo = chat
+    ? {
+        id: chat.id,
+        type: "video",
+        title: chat.title || chat.video.title,
+        dateAdded: chat.updatedAt,
+      }
+    : {
+        id: chatId,
+        type: "video",
+        title: listItem?.title ?? listItem?.videoTitle ?? "Loading...",
+        dateAdded: listItem?.updatedAt ?? new Date().toISOString(),
+      };
+
+  const youtubeId = chat?.video.youtubeId ?? listItem?.youtubeId ?? null;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white flex flex-col">
-      <AppHeader notionConnected={notionConnected} onLogout={logout} />
-
-      <div className="pt-20 px-4 max-w-3xl mx-auto w-full flex-1 flex flex-col pb-28">
-        <div className="mb-4 pb-4 border-b border-white/10">
-          <h1 className="text-lg font-semibold truncate">{chat.title || chat.video.title}</h1>
-          <p className="text-sm text-neutral-500 truncate">{chat.video.title}</p>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-6">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}
-            >
-              <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                  msg.role === "user" ? "bg-neutral-800" : "bg-purple-600"
-                }`}
-              >
-                {msg.role === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-              </div>
-              <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 relative group ${
-                  msg.role === "user"
-                    ? "bg-neutral-800"
-                    : "bg-neutral-900 border border-white/5 prose prose-invert max-w-none"
-                }`}
-              >
-                {msg.role === "user" ? (
-                  <p>{msg.content}</p>
-                ) : (
-                  <>
-                    {!msg.content && streamStatus && msg.id === streamingMessageId ? (
-                      <p className="text-sm text-neutral-400 flex items-center gap-2 m-0">
-                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                        {getStreamStatusLabel(streamStatus)}
-                      </p>
-                    ) : (
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    )}
-                    {notionConnected && msg.content && (
-                      <button
-                        onClick={() => handleSaveToNotion(msg)}
-                        disabled={savingToNotion === msg.id}
-                        className="absolute top-2 right-2 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10"
-                      >
-                        {savingToNotion === msg.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Bookmark className="w-4 h-4" />
-                        )}
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {isTyping && (
-            <div className="flex gap-3">
-              <div className="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center">
-                <Bot className="w-4 h-4" />
-              </div>
-              <div className="bg-neutral-900 border border-white/5 rounded-2xl px-4 py-3">
-                <Loader2 className="w-4 h-4 animate-spin" />
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-neutral-950/90 border-t border-white/5">
-        <form
-          onSubmit={handleSendMessage}
-          className="max-w-3xl mx-auto flex gap-2 bg-neutral-900 border border-white/10 rounded-xl p-2"
-        >
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about this video..."
-            disabled={isTyping || chat.video.status !== "READY"}
-            className="flex-1 bg-transparent outline-none px-3 text-white placeholder:text-neutral-500"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isTyping}
-            className="bg-white text-black p-2 rounded-lg disabled:opacity-50"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
-      </div>
-    </div>
+    <AppShell fixedViewport>
+      <VideoPlayerProvider youtubeId={youtubeId}>
+        <ConversationPage
+          source={activeSource}
+          sources={sources}
+          messages={messages}
+          isThinking={isTyping}
+          streamingMessageId={streamingMessageId}
+          messagesLoading={messagesLoading}
+          chatsLoading={chatsLoading}
+          onSendMessage={handleSendMessage}
+          onNewChat={() => router.push("/")}
+          onSelectSource={handleSelectChat}
+          isDark={isDark}
+          onThemeToggle={toggleTheme}
+          userEmail={user.email}
+          onLogout={logout}
+          inputDisabled={!chat || chat.video.status !== "READY"}
+          notionConnected={notionConnected}
+          onSaveToNotion={handleSaveToNotion}
+          savingToNotionId={savingToNotion}
+        />
+      </VideoPlayerProvider>
+    </AppShell>
   );
 }

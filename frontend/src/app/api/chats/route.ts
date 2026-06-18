@@ -17,7 +17,6 @@ export async function GET(req: NextRequest) {
       youtubeId: chat.video.youtubeId,
       videoStatus: chat.video.status,
       updatedAt: chat.updatedAt,
-      lastMessage: chat.messages[0]?.content ?? null,
     })),
   });
 }

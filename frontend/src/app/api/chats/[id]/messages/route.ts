@@ -4,6 +4,7 @@ import { MessageRole, VideoStatus } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getChatForUser,
+  getChatMessagesForUser,
   getRecentMessages,
   saveMessage,
   toApiRole,
@@ -13,6 +14,32 @@ import { setVideoSummary } from "@/lib/videos";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await getCurrentUser(req);
+  if (!user) {
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id: chatId } = await params;
+  const messages = await getChatMessagesForUser(chatId, user.id);
+
+  if (!messages) {
+    return NextResponse.json({ detail: "Chat not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    messages: messages.map((m) => ({
+      id: m.id,
+      role: m.role.toLowerCase(),
+      content: m.content,
+      createdAt: m.createdAt,
+    })),
+  });
+}
 
 async function saveAssistantMessage(
   chatId: string,

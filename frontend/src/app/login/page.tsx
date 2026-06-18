@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Mail, Lock, Loader2, ArrowRight, BookOpen } from "lucide-react";
+import { Mail, Lock, Loader2, ArrowRight, Zap } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -39,20 +39,17 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 relative overflow-hidden font-sans">
-      {/* Background blobs */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-900/20 blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-900/20 blur-[120px]" />
-      </div>
+    <div className="min-h-screen bg-[#030712] text-white flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vh] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vh] bg-violet-600/20 rounded-full blur-[120px] pointer-events-none" />
 
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl shadow-xl shadow-blue-500/20 mb-6">
-            <BookOpen className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-violet-600 rounded-2xl shadow-xl shadow-violet-500/20 mb-6">
+            <Zap className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Welcome Back</h1>
-          <p className="text-slate-400">Sign in to continue your transcription journey</p>
+          <h1 className="text-3xl font-bold tracking-tight mb-2">Welcome to DocuVision</h1>
+          <p className="text-slate-400">Sign in to chat with your videos and documents</p>
         </div>
 
         <div className="bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
@@ -100,7 +97,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 group"
+              className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white font-semibold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-violet-600/20 disabled:opacity-50 group"
             >
               {isLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

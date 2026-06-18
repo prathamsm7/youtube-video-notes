@@ -68,6 +68,12 @@ Instructions:
 - Always add the bottomline for answer in 1-2 lines if answer found.
 - Detect the language of "Latest User Query" and always write your entire answer in that language.
 - The context may be in Hindi or another language; translate and explain it in the user's language.
+- Citation rules (when Context includes timestamp labels like [8:40 - 9:48]):
+  - For each bullet point or explanation line, append the citation at the END of that line in this exact format: ( MM:SS - MM:SS )
+  - Example: **Pattern Recognition:** LLMs identify statistical patterns in text. ( 8:40 - 9:48 )
+  - Use ONLY timestamp ranges that appear in the Context labels above.
+  - Do NOT invent timestamps. If no matching segment exists for a point, omit the citation.
+  - Keep timestamp format as MM:SS or H:MM:SS matching the Context label.
 
 Format:
 - Use headings
@@ -178,7 +184,7 @@ async function prepareRagNode(
   const { context, chunkCount } = await retrieveContext(
     state.videoId,
     searchQuery,
-    5,
+    8,
   );
 
   emit(config, {

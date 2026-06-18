@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getChatForUser } from "@/lib/chats";
+import { getChatMetadataForUser } from "@/lib/chats";
 
 export async function GET(
   req: NextRequest,
@@ -12,7 +12,7 @@ export async function GET(
   }
 
   const { id } = await params;
-  const chat = await getChatForUser(id, user.id);
+  const chat = await getChatMetadataForUser(id, user.id);
 
   if (!chat) {
     return NextResponse.json({ detail: "Chat not found" }, { status: 404 });
@@ -21,17 +21,12 @@ export async function GET(
   return NextResponse.json({
     id: chat.id,
     title: chat.title || chat.video.title,
+    updatedAt: chat.updatedAt,
     video: {
       id: chat.video.id,
       youtubeId: chat.video.youtubeId,
       title: chat.video.title,
       status: chat.video.status,
     },
-    messages: chat.messages.map((m) => ({
-      id: m.id,
-      role: m.role.toLowerCase(),
-      content: m.content,
-      createdAt: m.createdAt,
-    })),
   });
 }

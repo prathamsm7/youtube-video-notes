@@ -2,6 +2,11 @@ import type { RetrieveContextResult } from "../types";
 import { collectionNameForVideo, getQdrantClient } from "../clients/qdrant";
 import { embedQuery } from "../ingestion/embedder";
 
+type QdrantPayload = {
+  text?: string;
+  context_text?: string;
+};
+
 export async function getAllChunks(videoId: string): Promise<string[]> {
   const client = getQdrantClient();
   const collectionName = collectionNameForVideo(videoId);
@@ -23,15 +28,11 @@ export async function getAllChunks(videoId: string): Promise<string[]> {
     });
 
     for (const record of page.points) {
-      const text = (record.payload as { text?: string } | undefined)?.text ?? "";
-      if (text) {
-        ordered.push({ id: record.id, text });
-      }
+      const text = (record.payload as QdrantPayload | undefined)?.text?.trim() ?? "";
+      if (text) ordered.push({ id: record.id, text });
     }
 
-    if (!page.next_page_offset) {
-      break;
-    }
+    if (!page.next_page_offset) break;
     offset = page.next_page_offset;
   }
 
@@ -47,25 +48,15 @@ export async function getAllChunks(videoId: string): Promise<string[]> {
 export async function retrieveContext(
   videoId: string,
   searchQuery: string,
-  limit = 5,
+  limit = 8,
   threshold = 0.35,
 ): Promise<RetrieveContextResult> {
   const client = getQdrantClient();
   const collectionName = collectionNameForVideo(videoId);
   const queryVector = await embedQuery(searchQuery);
 
-  console.info("[rag/retrieval] starting search", {
-    videoId,
-    collectionName,
-    searchQuery,
-    limit,
-    threshold,
-    queryVectorDimensions: queryVector.length,
-  });
-
   const exists = await client.collectionExists(collectionName);
   if (!exists.exists) {
-    console.warn("[rag/retrieval] collection does not exist", { collectionName });
     return { context: null, chunkCount: 0 };
   }
 
@@ -80,11 +71,6 @@ export async function retrieveContext(
     let points = results.points ?? [];
 
     if (!points.length) {
-      console.warn("[rag/retrieval] no chunks above threshold, retrying without filter", {
-        collectionName,
-        threshold,
-      });
-
       results = await client.query(collectionName, {
         query: queryVector,
         limit,
@@ -93,37 +79,16 @@ export async function retrieveContext(
       points = results.points ?? [];
     }
 
-    const scores = points.map((point) => point.score ?? 0);
-    const texts = points
-      .map((point) => (point.payload as { text?: string } | undefined)?.text ?? "")
-      .filter(Boolean);
-
-    const context = texts.length ? texts.join("\n\n") : null;
-
-    console.info("[rag/retrieval] completed", {
-      collectionName,
-      retrievedChunkCount: texts.length,
-      contextCharacterLength: context?.length ?? 0,
-      topScores: scores.slice(0, 5),
-      hasContext: Boolean(context),
-    });
-
-    if (!context) {
-      console.warn("[rag/retrieval] empty context after search", {
-        collectionName,
-        rawPointCount: points.length,
-      });
-    }
+    const parts = points
+      .map((point) => (point.payload as QdrantPayload | undefined)?.context_text?.trim())
+      .filter((text): text is string => Boolean(text));
 
     return {
-      context,
-      chunkCount: texts.length,
+      context: parts.length ? parts.join("\n\n") : null,
+      chunkCount: parts.length,
     };
   } catch (error) {
-    console.error("[rag/retrieval] Qdrant search error", {
-      collectionName,
-      error,
-    });
+    console.error("[rag/retrieval] Qdrant search error", { collectionName, error });
     return { context: null, chunkCount: 0 };
   }
 }

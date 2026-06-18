@@ -31,22 +31,32 @@ export async function listUserChats(userId: number) {
     orderBy: { updatedAt: "desc" },
     include: {
       video: true,
-      messages: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      },
     },
   });
 }
 
-export async function getChatForUser(chatId: string, userId: number) {
+export async function getChatMetadataForUser(chatId: string, userId: number) {
   return prisma.chat.findFirst({
     where: { id: chatId, userId },
-    include: {
-      video: true,
-      messages: { orderBy: { createdAt: "asc" } },
-    },
+    include: { video: true },
   });
+}
+
+export async function getChatMessagesForUser(chatId: string, userId: number) {
+  const chat = await prisma.chat.findFirst({
+    where: { id: chatId, userId },
+    select: { id: true },
+  });
+  if (!chat) return null;
+
+  return prisma.message.findMany({
+    where: { chatId },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function getChatForUser(chatId: string, userId: number) {
+  return getChatMetadataForUser(chatId, userId);
 }
 
 export async function getRecentMessages(chatId: string, limit = 6) {

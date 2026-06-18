@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Mail, Lock, Loader2, ArrowRight, BookOpen, UserPlus } from "lucide-react";
+import { Mail, Lock, Loader2, ArrowRight, Zap } from "lucide-react";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
@@ -39,20 +39,17 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 relative overflow-hidden font-sans">
-      {/* Background blobs */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-900/20 blur-[120px]" />
-        <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-900/20 blur-[120px]" />
-      </div>
+    <div className="min-h-screen bg-[#030712] text-white flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      <div className="absolute top-[-10%] right-[-10%] w-[40vw] h-[40vh] bg-violet-600/20 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] left-[-10%] w-[40vw] h-[40vh] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
 
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-xl shadow-indigo-500/20 mb-6">
-            <UserPlus className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-violet-600 rounded-2xl shadow-xl shadow-violet-500/20 mb-6">
+            <Zap className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Create Account</h1>
-          <p className="text-slate-400">Join the future of intelligent video analysis</p>
+          <h1 className="text-3xl font-bold tracking-tight mb-2">Join DocuVision</h1>
+          <p className="text-slate-400">Create an account to chat with your videos</p>
         </div>
 
         <div className="bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">

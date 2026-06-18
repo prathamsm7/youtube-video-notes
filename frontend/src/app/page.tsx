@@ -2,65 +2,66 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, MessageSquare, PlayCircle, ArrowRight } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { AppHeader } from "@/components/AppHeader";
+import { useTheme } from "@/context/ThemeContext";
+import { AppShell } from "@/components/docuvision/AppShell";
+import { LandingPage } from "@/components/docuvision/LandingPage";
+import { ProcessingScreen } from "@/components/docuvision/ProcessingScreen";
+import { SourceType } from "@/types/ui";
 
-type ChatItem = {
-  id: string;
-  title: string;
-  videoTitle: string;
-  updatedAt: string;
-  lastMessage: string | null;
-};
+type JobStatus =
+  | "idle"
+  | "extracting"
+  | "chunking"
+  | "embedding"
+  | "processing"
+  | "completed"
+  | "failed";
 
-type JobStatus = "idle" | "extracting" | "chunking" | "embedding" | "processing" | "completed" | "failed";
+const VIDEO_STEPS = [
+  "Downloading video transcript...",
+  "Extracting keyframes...",
+  "Generating semantic embeddings...",
+  "Ready to chat!",
+];
+
+function jobPhaseToStep(phase: JobStatus): number {
+  switch (phase) {
+    case "extracting":
+      return 0;
+    case "chunking":
+      return 1;
+    case "embedding":
+    case "processing":
+      return 2;
+    case "completed":
+      return 3;
+    default:
+      return 0;
+  }
+}
 
 export default function HomePage() {
-  const { user, apiFetch, logout, isLoading: authLoading } = useAuth();
+  const { user, apiFetch, isLoading: authLoading } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const router = useRouter();
 
-  const [chats, setChats] = useState<ChatItem[]>([]);
-  const [url, setUrl] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [view, setView] = useState<"landing" | "processing">("landing");
+  const [processingTitle, setProcessingTitle] = useState("");
+  const [processingType, setProcessingType] = useState<SourceType>("video");
   const [jobPhase, setJobPhase] = useState<JobStatus>("idle");
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
-  const [notionConnected, setNotionConnected] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.push("/login");
   }, [user, authLoading, router]);
 
-  const loadChats = useCallback(async () => {
-    try {
-      const res = await apiFetch("/api/chats");
-      if (res.ok) {
-        const data = await res.json();
-        setChats(data.chats);
-      }
-    } catch {
-      // ignore
-    }
-  }, [apiFetch]);
-
-  useEffect(() => {
-    if (user) loadChats();
-  }, [user, loadChats]);
-
-  useEffect(() => {
-    if (!user) return;
-    apiFetch("/api/notion/status")
-      .then((res) => res.json())
-      .then((data) => setNotionConnected(data.connected))
-      .catch(() => setNotionConnected(false));
-  }, [user, apiFetch]);
-
-  const handleProcessVideo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!url.trim()) return;
-
-    setIsProcessing(true);
+  const processVideo = async (youtubeUrl: string) => {
+    setView("processing");
+    setProcessingTitle(youtubeUrl);
+    setProcessingType("video");
     setJobPhase("extracting");
     setError(null);
     setProgress({ processed: 0, total: 0 });
@@ -68,7 +69,7 @@ export default function HomePage() {
     try {
       const res = await apiFetch("/api/videos/process/stream", {
         method: "POST",
-        body: JSON.stringify({ youtube_url: url }),
+        body: JSON.stringify({ youtube_url: youtubeUrl }),
       });
 
       if (!res.ok) {
@@ -98,6 +99,7 @@ export default function HomePage() {
 
           if (payload.type === "started") {
             setJobPhase("extracting");
+            if (payload.title) setProcessingTitle(payload.title);
           } else if (payload.type === "progress" && payload.status) {
             setJobPhase(payload.status as JobStatus);
             if (payload.total_chunks) {
@@ -107,12 +109,13 @@ export default function HomePage() {
               });
             }
           } else if (payload.type === "complete" && payload.chatId) {
-            router.push(`/chat/${payload.chatId}`);
+            setJobPhase("completed");
+            if (payload.title) setProcessingTitle(payload.title);
+            setTimeout(() => router.push(`/chat/${payload.chatId}`), 600);
             return;
           } else if (payload.type === "error") {
             setError(payload.error || "Processing failed");
             setJobPhase("failed");
-            setIsProcessing(false);
             return;
           }
         }
@@ -120,84 +123,57 @@ export default function HomePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
       setJobPhase("failed");
-      setIsProcessing(false);
     }
   };
 
+  const handleProcessStart = useCallback(
+    (type: SourceType, input: string) => {
+      if (type === "video") {
+        processVideo(input);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [apiFetch, router],
+  );
+
   if (authLoading || !user) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+      <div className="min-h-screen bg-[#030712] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-violet-500" />
       </div>
     );
   }
 
+  const progressLabel =
+    progress.total > 0 ? `${progress.processed} / ${progress.total} chunks` : undefined;
+
   return (
-    <div className="min-h-screen bg-neutral-950 text-white">
-      <AppHeader notionConnected={notionConnected} onLogout={logout} />
+    <AppShell>
+      {view === "landing" && (
+        <LandingPage
+          onProcessStart={handleProcessStart}
+          isDark={isDark}
+          onThemeToggle={toggleTheme}
+          error={error}
+        />
+      )}
 
-      <main className="pt-24 px-4 max-w-3xl mx-auto pb-12">
-        <h1 className="text-3xl font-bold mb-2">Your chats</h1>
-        <p className="text-neutral-400 mb-8">Pick a past conversation or analyze a new video.</p>
-
-        {chats.length > 0 && (
-          <div className="space-y-2 mb-10">
-            {chats.map((chat) => (
-              <button
-                key={chat.id}
-                onClick={() => router.push(`/chat/${chat.id}`)}
-                className="w-full text-left p-4 rounded-xl border border-white/10 bg-neutral-900 hover:bg-neutral-800 transition flex items-start gap-3"
-              >
-                <MessageSquare className="w-5 h-5 text-purple-400 mt-0.5 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{chat.title || chat.videoTitle}</p>
-                  {chat.lastMessage && (
-                    <p className="text-sm text-neutral-500 truncate mt-1">{chat.lastMessage}</p>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="border border-white/10 rounded-2xl p-6 bg-neutral-900">
-          <h2 className="text-lg font-semibold mb-4">New video</h2>
-
-          {isProcessing ? (
-            <div className="text-center py-8 space-y-4">
-              <Loader2 className="w-10 h-10 animate-spin text-purple-500 mx-auto" />
-              <p className="text-neutral-300 capitalize">{jobPhase}...</p>
-              {progress.total > 0 && (
-                <p className="text-sm text-neutral-500">
-                  {progress.processed} / {progress.total} chunks
-                </p>
-              )}
-            </div>
-          ) : (
-            <form onSubmit={handleProcessVideo} className="flex gap-2">
-              <div className="pl-3 flex items-center text-neutral-500">
-                <PlayCircle className="w-5 h-5" />
-              </div>
-              <input
-                type="url"
-                required
-                placeholder="https://youtube.com/watch?v=..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="flex-1 bg-transparent outline-none text-white placeholder:text-neutral-600"
-              />
-              <button
-                type="submit"
-                className="bg-white text-black px-4 py-2 rounded-lg font-medium flex items-center gap-2"
-              >
-                Analyze <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
-          )}
-
-          {error && <p className="text-red-400 text-sm mt-4">{error}</p>}
-        </div>
-      </main>
-    </div>
+      {view === "processing" && (
+        <ProcessingScreen
+          type={processingType}
+          title={processingTitle}
+          currentStep={jobPhaseToStep(jobPhase)}
+          steps={VIDEO_STEPS}
+          isComplete={jobPhase === "completed"}
+          error={jobPhase === "failed" ? error : null}
+          progressLabel={progressLabel}
+          onRetry={() => {
+            setView("landing");
+            setError(null);
+            setJobPhase("idle");
+          }}
+        />
+      )}
+    </AppShell>
   );
 }

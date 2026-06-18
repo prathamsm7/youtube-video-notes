@@ -171,7 +171,13 @@ async function embedAndStoreNode(
         points: embeddings.map((vector, index) => ({
           id: i + index,
           vector,
-          payload: { text: batchChunks[index].text },
+          payload: {
+            text: batchChunks[index].text,
+            context_text: batchChunks[index].contextText,
+            start_seconds: batchChunks[index].startSeconds,
+            end_seconds: batchChunks[index].endSeconds,
+            chunk_index: batchChunks[index].chunkIndex,
+          },
         })),
       });
 
