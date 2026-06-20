@@ -1,6 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { generateWithFallback } from "../ai-handler";
+import { streamWithFallback } from "../ai-handler";
 import {
   CHAT_MODEL_ANSWER_FALLBACK,
   CHAT_MODEL_ANSWER_PRIMARY,
@@ -42,6 +42,7 @@ function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
 
 function buildAnswerPrompt(
   query: string,
+  language: string,
   context: string,
   chatHistory: ChatHistoryMessage[],
 ): string {
@@ -55,19 +56,21 @@ ${chatHistoryStr}
 Latest User Query:
 ${query}
 
+Detected answer language: ${language}
+
 Context:
 ${context}
 
 
 Instructions:
+- Write the entire answer in ${language} only.
+- The Context may be in a different language — translate and explain in ${language}.
 - Provide step-by-step explanation, use pointers if required or asked for it, else provide short answer in detailed.
 - Explain concepts clearly (like teaching a student)
 - Do NOT add information not present in context
 - If incomplete → say "Partial information available"
 - If not sure about answer just say I dont know the answer with the short 1-2 lines.
 - Always add the bottomline for answer in 1-2 lines if answer found.
-- Detect the language of "Latest User Query" and always write your entire answer in that language.
-- The context may be in Hindi or another language; translate and explain it in the user's language.
 - Citation rules (when Context includes timestamp labels like [8:40 - 9:48]):
   - For each bullet point or explanation line, append the citation at the END of that line in this exact format: ( MM:SS - MM:SS )
   - Example: **Pattern Recognition:** LLMs identify statistical patterns in text. ( 8:40 - 9:48 )
@@ -120,6 +123,8 @@ async function analyzeQueryNode(
   return {
     intent: result.intent,
     searchQuery: result.search_query,
+    language: result.language,
+    needsChatHistory: result.needs_chat_history,
   };
 }
 
@@ -147,8 +152,9 @@ async function summarizeNode(state: QueryState, config: LangGraphRunnableConfig)
 
   emit(config, { type: "status", phase: "summarizing" });
   try {
-    const summary = await mapReduceSummary(state.videoId);
-    emit(config, { type: "token", content: summary });
+    const summary = await mapReduceSummary(state.videoId, state.language, (token) => {
+      emit(config, { type: "token", content: token });
+    });
     emit(config, {
       type: "meta",
       payload: { intent: "SUMMARY", summary_generated: true },
@@ -185,6 +191,7 @@ async function prepareRagNode(
     state.videoId,
     searchQuery,
     8,
+    0.45
   );
 
   emit(config, {
@@ -227,18 +234,21 @@ async function generateAnswerNode(
   config: LangGraphRunnableConfig,
 ) {
   emit(config, { type: "status", phase: "generating" });
+
+  const historyForAnswer = state.needsChatHistory ? (state.chatHistory ?? []) : [];
   const prompt = buildAnswerPrompt(
     state.query,
+    state.language || "English",
     state.context ?? "",
-    state.chatHistory ?? [],
+    historyForAnswer,
   );
 
-  const response = await generateWithFallback(
+  const response = await streamWithFallback(
     prompt,
     CHAT_MODEL_ANSWER_PRIMARY,
     CHAT_MODEL_ANSWER_FALLBACK,
-    0.5,
-    { nostream: false },
+    (token) => emit(config, { type: "token", content: token }),
+    0,
   );
 
   emit(config, {

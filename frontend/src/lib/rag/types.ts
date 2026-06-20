@@ -24,6 +24,8 @@ export type QueryIntent = "SUMMARY" | "QA";
 export type AnalyzeQueryResult = {
   intent: QueryIntent;
   search_query: string;
+  language: string;
+  needs_chat_history: boolean;
 };
 
 export type RetrieveContextResult = {

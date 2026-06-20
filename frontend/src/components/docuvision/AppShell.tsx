@@ -16,7 +16,7 @@ export function AppShell({
   return (
     <div
       className={cn(
-        "flex flex-1 flex-col font-sans relative w-full transition-colors duration-300",
+        "flex flex-1 flex-col font-sans relative w-full overflow-x-hidden transition-colors duration-300",
         fixedViewport ? "h-dvh max-h-dvh overflow-hidden" : "min-h-full",
         isDark ? "dark" : "",
       )}

@@ -1,18 +1,28 @@
 "use client";
 
-import React from "react";
-import ReactMarkdown from "react-markdown";
+import React, { useMemo } from "react";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import type { Components } from "react-markdown";
 import { CITATION_RANGE_RE, parseTimestamp } from "@/lib/rag/timestamp";
 
-const inlineMarkdownComponents = {
-  p: ({ children }: { children?: React.ReactNode }) => <span className="inline">{children}</span>,
-  strong: ({ children }: { children?: React.ReactNode }) => (
-    <strong className="font-semibold">{children}</strong>
-  ),
-};
-
 const citationClassName =
-  "text-[8px] text-blue-400 hover:text-blue-300 hover:underline font-normal inline align-baseline ml-0.5 p-0 m-0 leading-[inherit] border-0 bg-transparent cursor-pointer not-prose";
+  "citation-timestamp text-blue-400 hover:text-blue-300 hover:underline font-normal inline whitespace-nowrap align-baseline ml-1 p-0 m-0 border-0 bg-transparent cursor-pointer";
+
+function injectCitationLinks(content: string): string {
+  const normalized = content.replace(/\n+\s*(?=\(\s*\d{1,2}:\d{2})/g, " ");
+  const re = new RegExp(CITATION_RANGE_RE.source, "g");
+  return normalized.replace(re, (_match, start: string, end: string) => {
+    const startSeconds = parseTimestamp(start);
+    return `[(${start} - ${end})](cite:${startSeconds})`;
+  });
+}
+
+function citationUrlTransform(url: string): string {
+  if (url.startsWith("cite:")) {
+    return url;
+  }
+  return defaultUrlTransform(url);
+}
 
 export function ContentWithCitations({
   content,
@@ -21,67 +31,68 @@ export function ContentWithCitations({
   content: string;
   onSeek?: (seconds: number) => void;
 }) {
-  const normalized = content.replace(/\n+\s*(?=\(\s*\d{1,2}:\d{2})/g, " ");
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  const re = new RegExp(CITATION_RANGE_RE.source, "g");
-  let match: RegExpExecArray | null;
-  let key = 0;
+  const markdown = useMemo(() => injectCitationLinks(content), [content]);
 
-  while ((match = re.exec(normalized)) !== null) {
-    if (match.index > lastIndex) {
-      const segment = normalized.slice(lastIndex, match.index);
-      parts.push(
-        <ReactMarkdown key={`md-${key++}`} components={inlineMarkdownComponents}>
-          {segment}
-        </ReactMarkdown>,
-      );
-    }
+  const components = useMemo<Components>(
+    () => ({
+      p: ({ children }) => <p className="m-0 mb-2 last:mb-0">{children}</p>,
+      ul: ({ children }) => <ul className="my-2 pl-5 list-disc space-y-1">{children}</ul>,
+      ol: ({ children }) => <ol className="my-2 pl-5 list-decimal space-y-1">{children}</ol>,
+      li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+      a: ({ href, children }) => {
+        if (href?.startsWith("cite:")) {
+          const startSeconds = parseInt(href.slice(5), 10);
+          const label = String(children);
 
-    const startLabel = match[1];
-    const endLabel = match[2];
-    const startSeconds = parseTimestamp(startLabel);
+          if (onSeek) {
+            return (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSeek(startSeconds);
+                }}
+                className={citationClassName}
+                title={`Jump to ${label.replace(/^\(|\)$/g, "").split(" - ")[0]?.trim() ?? label}`}
+              >
+                {children}
+              </button>
+            );
+          }
 
-    parts.push(
-      onSeek ? (
-        <button
-          key={`cite-${key++}`}
-          type="button"
-          onClick={() => onSeek(startSeconds)}
-          className={citationClassName}
-          title={`Jump to ${startLabel}`}
-        >
-          ({startLabel} - {endLabel})
-        </button>
-      ) : (
-        <span key={`cite-${key++}`} className={`${citationClassName} cursor-default`}>
-          ({startLabel} - {endLabel})
-        </span>
-      ),
-    );
+          return (
+            <span className={`${citationClassName} cursor-default`}>
+              {children}
+            </span>
+          );
+        }
 
-    lastIndex = match.index + match[0].length;
-  }
+        if (!href) {
+          return <span className={citationClassName}>{children}</span>;
+        }
 
-  if (lastIndex < normalized.length) {
-    parts.push(
-      <ReactMarkdown key={`md-${key++}`} components={inlineMarkdownComponents}>
-        {normalized.slice(lastIndex)}
-      </ReactMarkdown>,
-    );
-  }
-
-  if (parts.length === 0) {
-    return (
-      <div className="[&_p]:inline [&_p]:m-0 [&_p]:leading-[inherit]">
-        <ReactMarkdown components={inlineMarkdownComponents}>{normalized}</ReactMarkdown>
-      </div>
-    );
-  }
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-400 hover:underline"
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [onSeek],
+  );
 
   return (
-    <div className="[&_p]:inline [&_p]:m-0 [&_p]:leading-[inherit] [&_ul]:my-1 [&_li]:my-0">
-      {parts}
+    <div className="not-prose text-[15px] [&_p]:leading-relaxed [&_li]:leading-relaxed [&_ul]:leading-relaxed">
+      <ReactMarkdown urlTransform={citationUrlTransform} components={components}>
+        {markdown}
+      </ReactMarkdown>
     </div>
   );
 }

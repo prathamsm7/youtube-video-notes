@@ -119,7 +119,7 @@ function MessageBubble({
             "px-5 py-3.5 rounded-2xl text-[15px] leading-relaxed shadow-xl relative group",
             isUser
               ? "bg-slate-900 text-white dark:bg-blue-600/90 dark:text-white rounded-tr-none"
-              : "bg-white/80 dark:bg-white/5 backdrop-blur-md border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-tl-none prose prose-sm dark:prose-invert max-w-none",
+              : "bg-white/80 dark:bg-white/5 backdrop-blur-md border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-tl-none max-w-none",
           )}
         >
           {isUser ? (

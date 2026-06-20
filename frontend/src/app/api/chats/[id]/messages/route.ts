@@ -117,6 +117,7 @@ export async function POST(
           question,
           chatHistory,
           cachedSummary,
+          { userId: user.id, chatId },
         )) {
           if (event.kind === "status") {
             send({

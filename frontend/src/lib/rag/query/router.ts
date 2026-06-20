@@ -54,8 +54,15 @@ export async function analyzeQuery(
                     - If QA: rewrite into a standalone search phrase (use chat history to resolve pronouns)
                     - If SUMMARY: use the latest query as-is
 
+                    3. Detect the language of "Latest User Query" (e.g. "English", "Hindi", "Spanish").
+
+                    4. Decide if chat history is needed to answer the latest query (needs_chat_history).
+                    - true: follow-ups like "explain that simpler", "tell me more", "what about the second point",
+                      or uses pronouns referring to prior messages ("that", "it", "this", "above")
+                    - false: standalone question answerable from video context alone, or no prior turns
+
                     Output ONLY valid JSON, no markdown:
-                    {"intent": "SUMMARY" or "QA", "search_query": "..."}
+                    {"intent": "SUMMARY" or "QA", "search_query": "...", "language": "English", "needs_chat_history": false}
             `;
 
   try {
@@ -65,12 +72,31 @@ export async function analyzeQuery(
       cleaned = cleaned.replace(/^```json/, "").replace(/^```/, "").replace(/```$/, "").trim();
     }
 
-    const data = JSON.parse(cleaned) as { intent?: string; search_query?: string };
+    const data = JSON.parse(cleaned) as {
+      intent?: string;
+      search_query?: string;
+      language?: string;
+      needs_chat_history?: boolean;
+    };
     const intent = String(data.intent ?? "").toUpperCase() === "SUMMARY" ? "SUMMARY" : "QA";
     const searchQuery = String(data.search_query ?? query).trim() || query;
-    return { intent, search_query: searchQuery };
+    const language = String(data.language ?? "English").trim() || "English";
+    const hasHistory = chatHistory.length > 0;
+    const needsChatHistory = hasHistory && data.needs_chat_history === true;
+
+    return {
+      intent,
+      search_query: searchQuery,
+      language,
+      needs_chat_history: needsChatHistory,
+    };
   } catch (error) {
     console.warn("Query analysis error:", error);
-    return { intent: "QA", search_query: query };
+    return {
+      intent: "QA",
+      search_query: query,
+      language: "English",
+      needs_chat_history: false,
+    };
   }
 }

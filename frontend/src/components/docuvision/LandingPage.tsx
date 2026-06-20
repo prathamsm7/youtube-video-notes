@@ -60,7 +60,7 @@ export function LandingPage({
     : "text-slate-500 hover:text-slate-700";
 
   return (
-    <div className={cn("min-h-full transition-colors duration-300", isDark && "dark")}>
+    <div className={cn("min-h-full w-full max-w-full overflow-x-hidden transition-colors duration-300", isDark && "dark")}>
       <header
         className={cn(
           "fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b",
@@ -98,7 +98,7 @@ export function LandingPage({
         </div>
       </header>
 
-      <main className="pt-32 pb-16 px-4">
+      <main className="pt-32 pb-16 px-4 overflow-x-hidden">
         <div className="max-w-4xl mx-auto text-center space-y-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -107,7 +107,7 @@ export function LandingPage({
           >
             <h1
               className={cn(
-                "text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-tight",
+                "text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-tight break-words",
                 heading,
               )}
             >

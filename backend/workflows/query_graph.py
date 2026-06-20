@@ -136,7 +136,7 @@ Format:
         prompt=prompt,
         primary_model="gemini-3-flash-preview",
         fallback_model="gemini-2.5-pro",
-        config={"temperature": 0.5},
+        config={"temperature": 0},
     ):
         parts.append(chunk)
         _emit_token(chunk)

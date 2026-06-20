@@ -1,6 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { EMBEDDING_DIMENSIONS } from "../constants";
+import { EMBEDDING_DIMENSIONS, QDRANT_UPSERT_BATCH_SIZE } from "../constants";
 import { collectionNameForVideo, getQdrantClient } from "../clients/qdrant";
 import { chunkTranscript } from "../ingestion/chunking";
 import { generateEmbeddings } from "../ingestion/embedder";
@@ -160,14 +160,15 @@ async function embedAndStoreNode(
       };
     }
 
-    const batchSize = 100;
+    const batchSize = QDRANT_UPSERT_BATCH_SIZE;
     for (let i = existingCount; i < totalChunks; i += batchSize) {
       const batchChunks = chunks.slice(i, i + batchSize);
       const texts = batchChunks.map((chunk) => chunk.text);
       const embeddings = await generateEmbeddings(texts);
+      const isLastBatch = i + batchChunks.length >= totalChunks;
 
       await qdrant.upsert(collectionName, {
-        wait: true,
+        wait: isLastBatch,
         points: embeddings.map((vector, index) => ({
           id: i + index,
           vector,

@@ -7,10 +7,13 @@ export const EMBEDDING_DIMENSIONS = 1024;
 export const EMBEDDING_BATCH_SIZE = 32;
 export const EMBEDDING_API_URL = "https://api.jina.ai/v1/embeddings";
 
-export const CHAT_MODEL_FAST = "gemini-3.1-flash-lite-preview";
-export const CHAT_MODEL_STRONG = "gemini-2.5-flash";
-export const CHAT_MODEL_ANSWER_PRIMARY = "gemini-3-flash-preview";
-export const CHAT_MODEL_ANSWER_FALLBACK = "gemini-2.5-pro";
+export const SUMMARY_MAP_CONCURRENCY = 5;
+export const QDRANT_UPSERT_BATCH_SIZE = 100;
+
+export const CHAT_MODEL_FAST = "gpt-4o-mini";
+export const CHAT_MODEL_STRONG = "o4-mini";
+export const CHAT_MODEL_ANSWER_PRIMARY = "gpt-5.4-mini";
+export const CHAT_MODEL_ANSWER_FALLBACK = "gpt-4.1-mini";
 
 export const STREAM_HEADERS = {
   "Cache-Control": "no-cache, no-transform",

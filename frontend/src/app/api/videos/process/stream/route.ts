@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
 
         await setVideoProcessing(video.id);
 
-        for await (const event of streamIngestEvents(youtubeId)) {
+        for await (const event of streamIngestEvents(youtubeId, { userId: user.id })) {
           if (event.type === "complete" && !chatId) {
             chatId = await handleIngestComplete(
               video.id,

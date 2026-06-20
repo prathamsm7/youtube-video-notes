@@ -1,4 +1,4 @@
-import type { AIMessageChunk } from "@langchain/core/messages";
+import { traceConfig } from "../clients/langsmith";
 import { buildIngestGraph } from "./ingest-graph";
 import { buildQueryGraph } from "./query-graph";
 import type {
@@ -14,6 +14,8 @@ const emptyQueryState = {
   filterMessage: null,
   intent: "QA" as const,
   searchQuery: "",
+  language: "English",
+  needsChatHistory: false,
   context: null,
   response: "",
   summaryGenerated: false,
@@ -29,28 +31,6 @@ const emptyIngestState = {
   error: null,
   completed: false,
 };
-
-function extractMessageText(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") {
-          return part;
-        }
-        if (part && typeof part === "object" && "text" in part) {
-          return String((part as { text?: string }).text ?? "");
-        }
-        return "";
-      })
-      .join("");
-  }
-
-  return "";
-}
 
 function parseStreamChunk(
   chunk: unknown,
@@ -145,6 +125,7 @@ export async function* streamQueryResponse(
   query: string,
   chatHistory: ChatHistoryMessage[] = [],
   cachedSummary: string | null = null,
+  meta?: { userId?: number; chatId?: string },
 ): AsyncGenerator<QueryStreamEvent> {
   const stream = await queryGraph.stream(
     {
@@ -154,42 +135,31 @@ export async function* streamQueryResponse(
       cachedSummary,
       ...emptyQueryState,
     },
-    { streamMode: ["custom", "messages"] },
+    {
+      streamMode: "custom",
+      ...traceConfig("rag-query", { videoId, ...meta }),
+    },
   );
 
   for await (const chunk of stream) {
     const parsed = parseStreamChunk(chunk);
-    if (!parsed) continue;
+    if (!parsed || parsed.mode !== "custom") continue;
 
-    if (parsed.mode === "custom") {
-      const event = toQueryStreamEvent(parsed.data as Record<string, unknown>);
-      if (event) yield event;
-      continue;
-    }
-
-    if (parsed.mode === "messages") {
-      const [msgChunk, metadata] = parsed.data as [
-        AIMessageChunk,
-        { langgraph_node?: string },
-      ];
-      if (metadata?.langgraph_node !== "generate_answer") {
-        continue;
-      }
-
-      const content = extractMessageText(msgChunk.content);
-      if (content) {
-        yield { kind: "token", content };
-      }
-    }
+    const event = toQueryStreamEvent(parsed.data as Record<string, unknown>);
+    if (event) yield event;
   }
 }
 
 export async function* streamIngestEvents(
   videoId: string,
+  meta?: { userId?: number },
 ): AsyncGenerator<IngestStreamEvent> {
   const stream = await ingestGraph.stream(
     { videoId, ...emptyIngestState },
-    { streamMode: "custom" },
+    {
+      streamMode: "custom",
+      ...traceConfig("rag-ingest", { videoId, ...meta }),
+    },
   );
 
   for await (const chunk of stream) {

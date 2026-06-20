@@ -5,7 +5,26 @@ import { embedQuery } from "../ingestion/embedder";
 type QdrantPayload = {
   text?: string;
   context_text?: string;
+  chunk_index?: number;
 };
+
+function logRetrievedChunks(
+  videoId: string,
+  searchQuery: string,
+  points: Array<{ id: string | number; score?: number | null; payload?: QdrantPayload | null }>,
+  usedThreshold: boolean,
+) {
+  console.log("[rag/retrieval] retrieved chunks", {
+    videoId,
+    searchQuery,
+    usedThreshold,
+    chunks: points.map((point) => ({
+      id: point.id,
+      score: point.score ?? null,
+      chunk_index: point.payload?.chunk_index ?? null,
+    })),
+  });
+}
 
 export async function getAllChunks(videoId: string): Promise<string[]> {
   const client = getQdrantClient();
@@ -69,8 +88,10 @@ export async function retrieveContext(
     });
 
     let points = results.points ?? [];
+    let usedThreshold = true;
 
     if (!points.length) {
+      usedThreshold = false;
       results = await client.query(collectionName, {
         query: queryVector,
         limit,
@@ -79,9 +100,12 @@ export async function retrieveContext(
       points = results.points ?? [];
     }
 
+    logRetrievedChunks(videoId, searchQuery, points, usedThreshold);
+
     const parts = points
       .map((point) => (point.payload as QdrantPayload | undefined)?.context_text?.trim())
       .filter((text): text is string => Boolean(text));
+
 
     return {
       context: parts.length ? parts.join("\n\n") : null,
