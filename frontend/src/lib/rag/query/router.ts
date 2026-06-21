@@ -1,6 +1,12 @@
 import type { AnalyzeQueryResult, ChatHistoryMessage } from "../types";
-import { generateWithFallback } from "../ai-handler";
-import { CHAT_MODEL_FAST, CHAT_MODEL_STRONG } from "../constants";
+import { generate } from "../ai-handler";
+import { CHAT_MODEL_FAST } from "../constants";
+
+const SUMMARY_PATTERN =
+  /\b(summarize|summary|summarise|overview|recap|tl;?dr|main points|key points|gist|highlights)\b/i;
+
+const FOLLOW_UP_PATTERN =
+  /\b(that|it|this|those|these|above|previous|earlier|same|more)\b|explain (?:that |it )?(?:simpler|simply|easier)|tell me more|what about|in simpler terms|say (?:that |it )?again/i;
 
 export function ruleBasedFilter(query: string): string | null {
   const q = query.trim();
@@ -25,12 +31,88 @@ export function ruleBasedFilter(query: string): string | null {
 
 function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
   return chatHistory
-    .slice(-6)
+    .slice(-4)
     .map((msg) => `${msg.role.charAt(0).toUpperCase()}${msg.role.slice(1)}: ${msg.content}`)
     .join("\n");
 }
 
-export async function analyzeQuery(
+export function detectQueryLanguage(query: string): string {
+  if (/[\u0900-\u097F]/.test(query)) {
+    return "Hindi";
+  }
+  return "English";
+}
+
+function isSummaryQuery(query: string): boolean {
+  return SUMMARY_PATTERN.test(query.trim());
+}
+
+function needsLlmRouter(query: string, chatHistory: ChatHistoryMessage[]): boolean {
+  if (!chatHistory.length) {
+    return false;
+  }
+  return FOLLOW_UP_PATTERN.test(query.trim());
+}
+
+export function tryFastRoute(
+  query: string,
+  chatHistory: ChatHistoryMessage[] = [],
+): AnalyzeQueryResult | null {
+  const trimmed = query.trim();
+  if (!trimmed || needsLlmRouter(trimmed, chatHistory)) {
+    return null;
+  }
+
+  const language = detectQueryLanguage(trimmed);
+
+  if (isSummaryQuery(trimmed)) {
+    return {
+      intent: "SUMMARY",
+      search_query: trimmed,
+      language,
+      needs_chat_history: false,
+    };
+  }
+
+  return {
+    intent: "QA",
+    search_query: trimmed,
+    language,
+    needs_chat_history: false,
+  };
+}
+
+function parseRouterJson(
+  raw: string,
+  query: string,
+  chatHistory: ChatHistoryMessage[],
+): AnalyzeQueryResult {
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```json/, "").replace(/^```/, "").replace(/```$/, "").trim();
+  }
+
+  const data = JSON.parse(cleaned) as {
+    intent?: string;
+    search_query?: string;
+    language?: string;
+    needs_chat_history?: boolean;
+  };
+
+  const intent = String(data.intent ?? "").toUpperCase() === "SUMMARY" ? "SUMMARY" : "QA";
+  const searchQuery = String(data.search_query ?? query).trim() || query;
+  const language = String(data.language ?? detectQueryLanguage(query)).trim() || "English";
+  const hasHistory = chatHistory.length > 0;
+
+  return {
+    intent,
+    search_query: searchQuery,
+    language,
+    needs_chat_history: hasHistory && data.needs_chat_history === true,
+  };
+}
+
+async function analyzeQueryWithLlm(
   query: string,
   chatHistory: ChatHistoryMessage[] = [],
 ): Promise<AnalyzeQueryResult> {
@@ -39,64 +121,40 @@ export async function analyzeQuery(
     ? `Chat History:\n${historyStr}\n\n`
     : "Chat History: (none)\n\n";
 
-  const prompt = `
-                    You are understanding the intent of a user's query and routing it to the appropriate service.
+  const systemPrompt = `Route this video chat query.
 
-                    ${historyBlock}
-                    Latest User Query: ${query}
+Return JSON only:
+- intent: "SUMMARY" (whole-video overview) or "QA" (specific retrieval question)
+- search_query: standalone phrase for vector search; resolve pronouns from history when needed
+- language: language of the latest user query (e.g. "English", "Hindi")
+- needs_chat_history: true only if the answer requires prior chat turns
 
-                    Tasks:
-                    1. Classify intent as SUMMARY or QA.
-                    - SUMMARY: user wants a general overview or summary of the whole video
-                    - QA: user asks a specific question that needs retrieval from the video
+{"intent":"QA","search_query":"...","language":"English","needs_chat_history":false}`;
 
-                    2. Set search_query for vector search.
-                    - If QA: rewrite into a standalone search phrase (use chat history to resolve pronouns)
-                    - If SUMMARY: use the latest query as-is
+  const userPrompt = `${historyBlock}Latest User Query: ${query}`;
 
-                    3. Detect the language of "Latest User Query" (e.g. "English", "Hindi", "Spanish").
+  const raw = await generate(systemPrompt, userPrompt, CHAT_MODEL_FAST, 0);
+  return parseRouterJson(raw, query, chatHistory);
+}
 
-                    4. Decide if chat history is needed to answer the latest query (needs_chat_history).
-                    - true: follow-ups like "explain that simpler", "tell me more", "what about the second point",
-                      or uses pronouns referring to prior messages ("that", "it", "this", "above")
-                    - false: standalone question answerable from video context alone, or no prior turns
-
-                    Output ONLY valid JSON, no markdown:
-                    {"intent": "SUMMARY" or "QA", "search_query": "...", "language": "English", "needs_chat_history": false}
-            `;
+export async function analyzeQuery(
+  query: string,
+  chatHistory: ChatHistoryMessage[] = [],
+): Promise<AnalyzeQueryResult> {
+  const fast = tryFastRoute(query, chatHistory);
+  if (fast) {
+    return fast;
+  }
 
   try {
-    const raw = await generateWithFallback(prompt, CHAT_MODEL_FAST, CHAT_MODEL_STRONG, 0);
-    let cleaned = raw.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```json/, "").replace(/^```/, "").replace(/```$/, "").trim();
-    }
-
-    const data = JSON.parse(cleaned) as {
-      intent?: string;
-      search_query?: string;
-      language?: string;
-      needs_chat_history?: boolean;
-    };
-    const intent = String(data.intent ?? "").toUpperCase() === "SUMMARY" ? "SUMMARY" : "QA";
-    const searchQuery = String(data.search_query ?? query).trim() || query;
-    const language = String(data.language ?? "English").trim() || "English";
-    const hasHistory = chatHistory.length > 0;
-    const needsChatHistory = hasHistory && data.needs_chat_history === true;
-
-    return {
-      intent,
-      search_query: searchQuery,
-      language,
-      needs_chat_history: needsChatHistory,
-    };
+    return await analyzeQueryWithLlm(query, chatHistory);
   } catch (error) {
     console.warn("Query analysis error:", error);
     return {
       intent: "QA",
-      search_query: query,
-      language: "English",
-      needs_chat_history: false,
+      search_query: query.trim(),
+      language: detectQueryLanguage(query),
+      needs_chat_history: chatHistory.length > 0,
     };
   }
 }

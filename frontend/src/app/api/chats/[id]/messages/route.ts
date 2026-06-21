@@ -102,8 +102,10 @@ export async function POST(
       try {
         controller.enqueue(encoder.encode(sseComment("open")));
 
-        const history = await getRecentMessages(chatId, 6);
-        await saveMessage(chatId, MessageRole.USER, question);
+        const [history] = await Promise.all([
+          getRecentMessages(chatId, 6),
+          saveMessage(chatId, MessageRole.USER, question),
+        ]);
 
         const chatHistory = history.map((m) => ({
           role: toApiRole(m.role),

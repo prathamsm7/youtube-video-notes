@@ -35,6 +35,18 @@ export function ContentWithCitations({
 
   const components = useMemo<Components>(
     () => ({
+      h1: ({ children }) => (
+        <h1 className="text-xl font-bold mt-4 mb-2 first:mt-0 leading-snug">{children}</h1>
+      ),
+      h2: ({ children }) => (
+        <h2 className="text-lg font-semibold mt-4 mb-2 first:mt-0 leading-snug">{children}</h2>
+      ),
+      h3: ({ children }) => (
+        <h3 className="text-base font-semibold mt-3 mb-1.5 first:mt-0 leading-snug">{children}</h3>
+      ),
+      h4: ({ children }) => (
+        <h4 className="text-[15px] font-semibold mt-2 mb-1 first:mt-0 leading-snug">{children}</h4>
+      ),
       p: ({ children }) => <p className="m-0 mb-2 last:mb-0">{children}</p>,
       ul: ({ children }) => <ul className="my-2 pl-5 list-disc space-y-1">{children}</ul>,
       ol: ({ children }) => <ol className="my-2 pl-5 list-decimal space-y-1">{children}</ol>,

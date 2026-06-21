@@ -9,6 +9,7 @@ export const QueryStateAnnotation = Annotation.Root({
   filterMessage: Annotation<string | null>,
   intent: Annotation<"SUMMARY" | "QA">,
   searchQuery: Annotation<string>,
+  queryEmbedding: Annotation<number[] | null>,
   language: Annotation<string>,
   needsChatHistory: Annotation<boolean>,
   context: Annotation<string | null>,

@@ -14,6 +14,7 @@ const emptyQueryState = {
   filterMessage: null,
   intent: "QA" as const,
   searchQuery: "",
+  queryEmbedding: null,
   language: "English",
   needsChatHistory: false,
   context: null,

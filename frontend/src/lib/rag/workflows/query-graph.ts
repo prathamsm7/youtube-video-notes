@@ -1,12 +1,10 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { streamWithFallback } from "../ai-handler";
-import {
-  CHAT_MODEL_ANSWER_FALLBACK,
-  CHAT_MODEL_ANSWER_PRIMARY,
-} from "../constants";
+import { stream } from "../ai-handler";
+import { CHAT_MODEL_ANSWER_PRIMARY } from "../constants";
+import { embedQuery } from "../ingestion/embedder";
 import { analyzeQuery, ruleBasedFilter } from "../query/router";
-import { retrieveContext } from "../query/retrieval";
+import { retrieveContextWithVector } from "../query/retrieval";
 import { mapReduceSummary } from "../query/summarizer";
 import type { ChatHistoryMessage, QueryIntent } from "../types";
 import { QueryStateAnnotation, type QueryState } from "./states";
@@ -38,51 +36,6 @@ function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
     .join("\n");
 
   return `Chat History:\n${formatted}\n\n`;
-}
-
-function buildAnswerPrompt(
-  query: string,
-  language: string,
-  context: string,
-  chatHistory: ChatHistoryMessage[],
-): string {
-  const chatHistoryStr = formatChatHistory(chatHistory);
-  return `
-You are an expert teacher experienced in teaching with more than 20 years. Your task is to answer the user query using the context is provided.
-Only answer the question dont share any other information(your identity, your role, etc.) to user in answer, only provide answer to the query.
-
-${chatHistoryStr}
-
-Latest User Query:
-${query}
-
-Detected answer language: ${language}
-
-Context:
-${context}
-
-
-Instructions:
-- Write the entire answer in ${language} only.
-- The Context may be in a different language — translate and explain in ${language}.
-- Provide step-by-step explanation, use pointers if required or asked for it, else provide short answer in detailed.
-- Explain concepts clearly (like teaching a student)
-- Do NOT add information not present in context
-- If incomplete → say "Partial information available"
-- If not sure about answer just say I dont know the answer with the short 1-2 lines.
-- Always add the bottomline for answer in 1-2 lines if answer found.
-- Citation rules (when Context includes timestamp labels like [8:40 - 9:48]):
-  - For each bullet point or explanation line, append the citation at the END of that line in this exact format: ( MM:SS - MM:SS )
-  - Example: **Pattern Recognition:** LLMs identify statistical patterns in text. ( 8:40 - 9:48 )
-  - Use ONLY timestamp ranges that appear in the Context labels above.
-  - Do NOT invent timestamps. If no matching segment exists for a point, omit the citation.
-  - Keep timestamp format as MM:SS or H:MM:SS matching the Context label.
-
-Format:
-- Use headings
-- Use bullet points
-- Add explanation under each point
-`;
 }
 
 async function filterQueryNode(
@@ -119,10 +72,14 @@ async function analyzeQueryNode(
   config: LangGraphRunnableConfig,
 ) {
   emit(config, { type: "status", phase: "analyzing" });
-  const result = await analyzeQuery(state.query, state.chatHistory ?? []);
+  const [result, queryEmbedding] = await Promise.all([
+    analyzeQuery(state.query, state.chatHistory ?? []),
+    embedQuery(state.query),
+  ]);
   return {
     intent: result.intent,
     searchQuery: result.search_query,
+    queryEmbedding,
     language: result.language,
     needsChatHistory: result.needs_chat_history,
   };
@@ -187,11 +144,17 @@ async function prepareRagNode(
   const searchQuery = state.searchQuery || state.query;
   emit(config, { type: "status", phase: "retrieving" });
 
-  const { context, chunkCount } = await retrieveContext(
+  let queryVector = state.queryEmbedding;
+  if (!queryVector?.length || searchQuery !== state.query) {
+    queryVector = await embedQuery(searchQuery);
+  }
+
+  const { context, chunkCount } = await retrieveContextWithVector(
     state.videoId,
     searchQuery,
-    8,
-    0.45
+    queryVector,
+    4,
+    0.40,
   );
 
   emit(config, {
@@ -236,17 +199,46 @@ async function generateAnswerNode(
   emit(config, { type: "status", phase: "generating" });
 
   const historyForAnswer = state.needsChatHistory ? (state.chatHistory ?? []) : [];
-  const prompt = buildAnswerPrompt(
-    state.query,
-    state.language || "English",
-    state.context ?? "",
-    historyForAnswer,
-  );
+  const language = state.language || "English";
+  const chatHistoryStr = formatChatHistory(historyForAnswer);
 
-  const response = await streamWithFallback(
-    prompt,
+  const systemPrompt = `You are an expert chat assistant. Your task is to answer the user query using the context provided.
+    Only answer the question dont share any other information(your identity, your role, etc.) to user in answer.
+    Only provide answer to the asked query in detailed, nothing else.
+
+    Instructions:
+    - Write the entire answer in the detected answer language only.
+    - The Context may be in a different language — translate and explain in the detected answer language.
+    - Provide step-by-step answer in detailed.
+    - Explain concepts clearly.
+    - Do NOT add information not present in context
+    - If incomplete → say "Partial information available"
+    - If not sure about answer just say I dont know the answer with the short 1-2 lines.
+    - Always add the bottomline for answer in 1-2 lines if answer found.
+    - Citation rules (when Context includes timestamp labels like [8:40 - 9:48]):
+      - For each bullet point or explanation line, append the citation at the END of that line in this exact format: ( MM:SS - MM:SS )
+      - Example: **Pattern Recognition:** LLMs identify statistical patterns in text. ( 8:40 - 9:48 )
+      - Use ONLY timestamp ranges that appear in the Context labels above.
+      - Do NOT invent timestamps. If no matching segment exists for a point, omit the citation.
+      - Keep timestamp format as MM:SS or H:MM:SS matching the Context label.
+
+    Format:
+    - Use headings, Use bullet points, Add explanation under each point if required.
+    - Return the answer in Markdown format.
+  `;
+
+  const userPrompt = `${chatHistoryStr}
+      Latest User Query: ${state.query}
+
+      Detected answer language: ${language}
+
+      Context: ${state.context ?? ""}
+  `;
+
+  const response = await stream(
+    systemPrompt,
+    userPrompt,
     CHAT_MODEL_ANSWER_PRIMARY,
-    CHAT_MODEL_ANSWER_FALLBACK,
     (token) => emit(config, { type: "token", content: token }),
     0,
   );

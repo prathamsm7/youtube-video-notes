@@ -1,7 +1,11 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { EMBEDDING_DIMENSIONS, QDRANT_UPSERT_BATCH_SIZE } from "../constants";
-import { collectionNameForVideo, getQdrantClient } from "../clients/qdrant";
+import {
+  collectionNameForVideo,
+  getQdrantClient,
+  markCollectionReady,
+} from "../clients/qdrant";
 import { chunkTranscript } from "../ingestion/chunking";
 import { generateEmbeddings } from "../ingestion/embedder";
 import { getTranscript } from "../ingestion/transcript";
@@ -139,6 +143,7 @@ async function embedAndStoreNode(
     }
 
     if (existingCount >= totalChunks) {
+      markCollectionReady(state.videoId);
       progress(config, {
         status: "Completed Chunks Processing",
         total_chunks: totalChunks,
@@ -189,6 +194,8 @@ async function embedAndStoreNode(
         processed_chunks: processed,
       });
     }
+
+    markCollectionReady(state.videoId);
 
     progress(config, {
       status: "Completed Processing",

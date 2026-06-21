@@ -1,6 +1,12 @@
 import type { RetrieveContextResult } from "../types";
-import { collectionNameForVideo, getQdrantClient } from "../clients/qdrant";
+import {
+  collectionExistsForVideo,
+  collectionNameForVideo,
+  getQdrantClient,
+} from "../clients/qdrant";
 import { embedQuery } from "../ingestion/embedder";
+
+const FALLBACK_CHUNK_LIMIT = 3;
 
 type QdrantPayload = {
   text?: string;
@@ -8,10 +14,16 @@ type QdrantPayload = {
   chunk_index?: number;
 };
 
+type ScoredPoint = {
+  id: string | number;
+  score?: number | null;
+  payload?: QdrantPayload | null;
+};
+
 function logRetrievedChunks(
   videoId: string,
   searchQuery: string,
-  points: Array<{ id: string | number; score?: number | null; payload?: QdrantPayload | null }>,
+  points: ScoredPoint[],
   usedThreshold: boolean,
 ) {
   console.log("[rag/retrieval] retrieved chunks", {
@@ -26,14 +38,41 @@ function logRetrievedChunks(
   });
 }
 
-export async function getAllChunks(videoId: string): Promise<string[]> {
-  const client = getQdrantClient();
-  const collectionName = collectionNameForVideo(videoId);
+function pointsToContext(points: ScoredPoint[]): RetrieveContextResult {
+  const parts = points
+    .map((point) => point.payload?.context_text?.trim())
+    .filter((text): text is string => Boolean(text));
 
-  const exists = await client.collectionExists(collectionName);
-  if (!exists.exists) {
+  return {
+    context: parts.length ? parts.join("\n\n") : null,
+    chunkCount: parts.length,
+  };
+}
+
+function filterPointsByThreshold(
+  points: ScoredPoint[],
+  limit: number,
+  threshold: number,
+): { points: ScoredPoint[]; usedThreshold: boolean } {
+  const aboveThreshold = points.filter((point) => (point.score ?? 0) >= threshold);
+
+  if (aboveThreshold.length) {
+    return { points: aboveThreshold.slice(0, limit), usedThreshold: true };
+  }
+
+  return {
+    points: points.slice(0, Math.min(FALLBACK_CHUNK_LIMIT, limit)),
+    usedThreshold: false,
+  };
+}
+
+export async function getAllChunks(videoId: string): Promise<string[]> {
+  if (!(await collectionExistsForVideo(videoId))) {
     return [];
   }
+
+  const client = getQdrantClient();
+  const collectionName = collectionNameForVideo(videoId);
 
   const ordered: Array<{ id: number | string; text: string }> = [];
   let offset: string | number | Record<string, unknown> | undefined;
@@ -64,55 +103,53 @@ export async function getAllChunks(videoId: string): Promise<string[]> {
   return ordered.map((item) => item.text);
 }
 
+export async function retrieveContextWithVector(
+  videoId: string,
+  searchQuery: string,
+  queryVector: number[],
+  limit = 8,
+  threshold = 0.35,
+): Promise<RetrieveContextResult> {
+  if (!(await collectionExistsForVideo(videoId))) {
+    return { context: null, chunkCount: 0 };
+  }
+
+  const client = getQdrantClient();
+  const collectionName = collectionNameForVideo(videoId);
+
+  try {
+    const results = await client.query(collectionName, {
+      query: queryVector,
+      limit,
+      with_payload: true,
+    });
+
+    const rawPoints = (results.points ?? []) as ScoredPoint[];
+    const { points, usedThreshold } = filterPointsByThreshold(rawPoints, limit, threshold);
+
+    logRetrievedChunks(videoId, searchQuery, points, usedThreshold);
+
+    return pointsToContext(points);
+  } catch (error) {
+    console.error("[rag/retrieval] Qdrant search error", { collectionName, error });
+    return { context: null, chunkCount: 0 };
+  }
+}
+
 export async function retrieveContext(
   videoId: string,
   searchQuery: string,
   limit = 8,
   threshold = 0.35,
 ): Promise<RetrieveContextResult> {
-  const client = getQdrantClient();
-  const collectionName = collectionNameForVideo(videoId);
-  const queryVector = await embedQuery(searchQuery);
+  const [queryVector, exists] = await Promise.all([
+    embedQuery(searchQuery),
+    collectionExistsForVideo(videoId),
+  ]);
 
-  const exists = await client.collectionExists(collectionName);
-  if (!exists.exists) {
+  if (!exists) {
     return { context: null, chunkCount: 0 };
   }
 
-  try {
-    let results = await client.query(collectionName, {
-      query: queryVector,
-      limit,
-      score_threshold: threshold,
-      with_payload: true,
-    });
-
-    let points = results.points ?? [];
-    let usedThreshold = true;
-
-    if (!points.length) {
-      usedThreshold = false;
-      results = await client.query(collectionName, {
-        query: queryVector,
-        limit,
-        with_payload: true,
-      });
-      points = results.points ?? [];
-    }
-
-    logRetrievedChunks(videoId, searchQuery, points, usedThreshold);
-
-    const parts = points
-      .map((point) => (point.payload as QdrantPayload | undefined)?.context_text?.trim())
-      .filter((text): text is string => Boolean(text));
-
-
-    return {
-      context: parts.length ? parts.join("\n\n") : null,
-      chunkCount: parts.length,
-    };
-  } catch (error) {
-    console.error("[rag/retrieval] Qdrant search error", { collectionName, error });
-    return { context: null, chunkCount: 0 };
-  }
+  return retrieveContextWithVector(videoId, searchQuery, queryVector, limit, threshold);
 }
