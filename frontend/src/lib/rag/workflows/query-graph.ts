@@ -3,7 +3,7 @@ import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { stream } from "../ai-handler";
 import { CHAT_MODEL_ANSWER_PRIMARY } from "../constants";
 import { embedQuery } from "../ingestion/embedder";
-import { analyzeQuery, ruleBasedFilter } from "../query/router";
+import { analyzeQuery } from "../query/router";
 import { retrieveContextWithVector } from "../query/retrieval";
 import { mapReduceSummary } from "../query/summarizer";
 import type { ChatHistoryMessage, QueryIntent } from "../types";
@@ -36,35 +36,6 @@ function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
     .join("\n");
 
   return `Chat History:\n${formatted}\n\n`;
-}
-
-async function filterQueryNode(
-  state: QueryState,
-  config: LangGraphRunnableConfig,
-) {
-  const filterMessage = ruleBasedFilter(state.query);
-  if (filterMessage) {
-    emit(config, { type: "token", content: filterMessage });
-    emit(config, {
-      type: "meta",
-      payload: { intent: "QA", summary_generated: false },
-    });
-    return {
-      filterMessage,
-      response: filterMessage,
-      intent: "QA" as const,
-      summaryGenerated: false,
-    };
-  }
-
-  return { filterMessage: null };
-}
-
-function routeAfterFilter(state: QueryState) {
-  if (state.filterMessage) {
-    return END;
-  }
-  return "analyze_query";
 }
 
 async function analyzeQueryNode(
@@ -221,18 +192,32 @@ async function generateAnswerNode(
       - Use ONLY timestamp ranges that appear in the Context labels above.
       - Do NOT invent timestamps. If no matching segment exists for a point, omit the citation.
       - Keep timestamp format as MM:SS or H:MM:SS matching the Context label.
+    - Maintain the professional and friendly tone.
 
     Format:
     - Use headings, Use bullet points, Add explanation under each point if required.
     - Return the answer in Markdown format.
+
+    Example:
+    Question: Benefits of Self Attention
+    Answer: The self-attention mechanism offers significant advantages over traditional sequential models like RNNs, as detailed in the video (31:18 - 34:29). These primary benefits include:
+
+            Parallelization and Efficiency (31:18 - 33:05): In RNNs, processing must occur sequentially, meaning the model must finish one word before moving to the next. In contrast, self-attention processes all words in a sequence simultaneously. This allows for massive parallelization on modern hardware (like GPUs), making training significantly faster.
+            Computational Complexity (33:01 - 33:17): Because self-attention eliminates the need for sequential processing, the computational order is 
+            relative to the sequence length, whereas RNN processing order is O(n^2), where n is the sequence length.
+            Capturing Long-Range Dependencies (33:18 - 34:29): One of the biggest challenges for RNNs is remembering relationships between words at the beginning of a long sentence and those at the end. Because self-attention evaluates the relationship between every word in a sequence directly, it can effortlessly capture these long-range dependencies regardless of the distance between words.
+            
+            Bottom Line: The self-attention mechanism is a powerful tool for natural language processing tasks, offering significant advantages over traditional sequential models like RNNs.
+
+
   `;
 
-  const userPrompt = `${chatHistoryStr}
-      Latest User Query: ${state.query}
-
-      Detected answer language: ${language}
-
-      Context: ${state.context ?? ""}
+  const userPrompt = `
+  ${state.needsChatHistory ? `Chat History: ${chatHistoryStr} \n\n` : ""}
+  Original User Query: ${state.query} \n\n
+  Rewritten User Query: ${state.searchQuery} \n\n
+  Detected answer language: ${language} \n\n
+  Context: ${state.context ?? ""} \n\n
   `;
 
   const response = await stream(
@@ -256,13 +241,11 @@ async function generateAnswerNode(
 
 export function buildQueryGraph() {
   const graph = new StateGraph(QueryStateAnnotation)
-    .addNode("filter_query", filterQueryNode)
     .addNode("analyze_query", analyzeQueryNode)
     .addNode("summarize", summarizeNode)
     .addNode("prepare_rag", prepareRagNode)
     .addNode("generate_answer", generateAnswerNode)
-    .addEdge(START, "filter_query")
-    .addConditionalEdges("filter_query", routeAfterFilter)
+    .addEdge(START, "analyze_query")
     .addConditionalEdges("analyze_query", routeAfterIntent)
     .addEdge("summarize", END)
     .addConditionalEdges("prepare_rag", routeAfterPrepare)
