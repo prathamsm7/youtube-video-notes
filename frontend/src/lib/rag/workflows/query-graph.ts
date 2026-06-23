@@ -1,7 +1,10 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { stream } from "../ai-handler";
-import { CHAT_MODEL_ANSWER_PRIMARY } from "../constants";
+import {
+  CHAT_MODEL_ANSWER_PRIMARY,
+  RETRIEVAL_CHUNK_LIMIT,
+} from "../constants";
 import { embedQuery } from "../ingestion/embedder";
 import { analyzeQuery } from "../query/router";
 import { retrieveContextWithVector } from "../query/retrieval";
@@ -22,20 +25,19 @@ function emit(config: LangGraphRunnableConfig, event: QueryCustomEvent) {
   config.writer?.(event);
 }
 
-function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
+function formatAnswerChatHistory(chatHistory: ChatHistoryMessage[]): string {
+
   if (!chatHistory.length) {
     return "";
   }
-
-  const formatted = chatHistory
+  
+  return chatHistory
     .slice(-6)
-    .map(
-      (msg) =>
-        `${msg.role.charAt(0).toUpperCase()}${msg.role.slice(1)}: ${msg.content}`,
-    )
-    .join("\n");
-
-  return `Chat History:\n${formatted}\n\n`;
+    .map((msg, index) => {
+      const role = msg.role === "user" ? "User" : "Assistant";
+      return `[Turn ${index + 1}]\n${role}: ${msg.content.trim()}`;
+    })
+    .join("\n\n");
 }
 
 async function analyzeQueryNode(
@@ -124,8 +126,7 @@ async function prepareRagNode(
     state.videoId,
     searchQuery,
     queryVector,
-    4,
-    0.40,
+    RETRIEVAL_CHUNK_LIMIT,
   );
 
   emit(config, {
@@ -169,21 +170,19 @@ async function generateAnswerNode(
 ) {
   emit(config, { type: "status", phase: "generating" });
 
-  const historyForAnswer = state.needsChatHistory ? (state.chatHistory ?? []) : [];
-  const language = state.language || "English";
-  const chatHistoryStr = formatChatHistory(historyForAnswer);
-
   const systemPrompt = `You are an expert chat assistant. Your task is to answer the user query using the context provided.
     Only answer the question dont share any other information(your identity, your role, etc.) to user in answer.
     Only provide answer to the asked query in detailed, nothing else.
 
     Instructions:
-    - Write the entire answer in the detected answer language only.
-    - The Context may be in a different language — translate and explain in the detected answer language.
-    - Provide step-by-step answer in detailed.
-    - Explain concepts clearly.
-    - Do NOT add information not present in context
-    - If incomplete → say "Partial information available"
+    - Answer ONLY in the same language as the Current User Query. Never switch language based on Context or Chat History.
+    - If Context is in a different language, translate the relevant parts into the query language.
+    - Chat History is provided only for follow-up questions. If the Chat History section is absent, do not reference or use prior turns.
+    - Start with short answer to the query and then expand it in detailed below .
+    - Explain each concept clearly using the context provided.
+    - Do NOT add information not present in context.
+    - DO not add made up examples in the answer.
+    - If incomplete → say "Partial information available".
     - If not sure about answer just say I dont know the answer with the short 1-2 lines.
     - Always add the bottomline for answer in 1-2 lines if answer found.
     - Citation rules (when Context includes timestamp labels like [8:40 - 9:48]):
@@ -195,7 +194,7 @@ async function generateAnswerNode(
     - Maintain the professional and friendly tone.
 
     Format:
-    - Use headings, Use bullet points, Add explanation under each point if required.
+    - Use bullet points, Add explanation under each point if required.
     - Return the answer in Markdown format.
 
     Example:
@@ -212,20 +211,33 @@ async function generateAnswerNode(
 
   `;
 
-  const userPrompt = `
-  ${state.needsChatHistory ? `Chat History: ${chatHistoryStr} \n\n` : ""}
-  Original User Query: ${state.query} \n\n
-  Rewritten User Query: ${state.searchQuery} \n\n
-  Detected answer language: ${language} \n\n
-  Context: ${state.context ?? ""} \n\n
-  `;
+  const userPrompt = `${
+    state.needsChatHistory && state.chatHistory?.length
+      ? `--- Chat History ---\n${formatAnswerChatHistory(state.chatHistory)}\n--- End Chat History ---\n\n`
+      : ""
+  }--- Current User Query ---
+${state.query.trim()}
+Query language: ${state.language}
+--- End Current User Query ---
+
+--- Search Query ---
+${(state.searchQuery || state.query).trim()}
+--- End Search Query ---
+
+--- Context ---
+${state.context ?? ""}
+--- End Context ---
+
+Answer the question in the ${state.language} language only.
+
+`;
 
   const response = await stream(
     systemPrompt,
     userPrompt,
     CHAT_MODEL_ANSWER_PRIMARY,
     (token) => emit(config, { type: "token", content: token }),
-    0,
+    0.1,
   );
 
   emit(config, {

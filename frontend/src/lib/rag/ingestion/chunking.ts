@@ -3,7 +3,7 @@ import { formatTimestampRange } from "../timestamp";
 import type { TextChunk, TranscriptSegment } from "../types";
 
 /**
- * Merge transcript segments into 5-minute windows with 20% overlap.
+ * Merge transcript segments into overlapping time windows.
  * - `text`: pure joined text for embedding only
  * - `contextText`: same window with per-segment timestamp labels (for LLM / citations)
  */

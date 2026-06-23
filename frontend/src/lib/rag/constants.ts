@@ -1,13 +1,18 @@
-// export const WINDOW_SECONDS = 300;
-// export const OVERLAP_RATIO = 0.2;
+
 export const WINDOW_SECONDS = 180;
-export const OVERLAP_RATIO = 0.1667; // Equivalent to 30s / 180s (1/6th)
+export const OVERLAP_RATIO = 0.1667; // 30s overlap on 180s windows
 export const STEP_SECONDS = WINDOW_SECONDS * (1 - OVERLAP_RATIO);
 
-export const EMBEDDING_MODEL = "jina-embeddings-v3";
-export const EMBEDDING_DIMENSIONS = 1024;
+export const EMBEDDING_MODEL = "text-embedding-3-small";
+export const EMBEDDING_DIMENSIONS = 1536;
 export const EMBEDDING_BATCH_SIZE = 32;
-export const EMBEDDING_API_URL = "https://api.jina.ai/v1/embeddings";
+
+/** Qdrant top-K passed to reranker */
+export const RETRIEVAL_CANDIDATE_LIMIT = 10;
+/** Chunks passed to the answer LLM after reranking */
+export const RETRIEVAL_CHUNK_LIMIT = 5;
+
+export const RERANKER_MODEL = "jina-reranker-v2-base-multilingual";
 
 export const SUMMARY_MAP_CONCURRENCY = 5;
 export const QDRANT_UPSERT_BATCH_SIZE = 100;

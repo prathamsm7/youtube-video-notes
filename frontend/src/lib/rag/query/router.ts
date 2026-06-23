@@ -45,7 +45,7 @@ function parseRouterJson(
 
   const intent = resolveIntent(query);
   const searchQuery = String(data.search_query ?? query).trim() || query;
-  const language = String(data.language ?? detectQueryLanguage(query)).trim() || "English";
+  const language = String(data.language ?? "English").trim();
   const hasHistory = chatHistory.length > 0;
 
   return {
@@ -65,7 +65,13 @@ export async function analyzeQuery(
     ? `Chat History:\n${historyStr}\n\n`
     : "Chat History: (none)\n\n";
 
-  const systemPrompt = `Route this video chat query.
+  const systemPrompt = `You are an expert query router, query rewriter and language detector. 
+  Your task is to understand the intent of a user's query and rewrite it if needed and detect the language of the query.
+
+Search query rules:
+- Maintain the meaning of the query.
+- Rewrite, expand or rephrase the query if needed to make it more clear and concise.
+- Use provided chat history to resolve pronouns and understand the context of the query.
 
 Intent rules:
 - SUMMARY: ONLY when the user explicitly asks for a full-video overview (summarize, recap, main points, etc.)
@@ -109,8 +115,8 @@ Return JSON only:
     return {
       intent: resolveIntent(query),
       search_query: query.trim(),
-      language: detectQueryLanguage(query),
-      needs_chat_history: chatHistory.length > 0,
+      language: "English",
+      needs_chat_history: false,
     };
   }
 }

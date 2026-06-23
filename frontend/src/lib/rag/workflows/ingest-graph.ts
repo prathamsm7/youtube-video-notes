@@ -1,6 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { EMBEDDING_DIMENSIONS, QDRANT_UPSERT_BATCH_SIZE } from "../constants";
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, QDRANT_UPSERT_BATCH_SIZE } from "../constants";
 import {
   collectionNameForVideo,
   getQdrantClient,
@@ -9,7 +9,8 @@ import {
 import { chunkTranscript } from "../ingestion/chunking";
 import { generateEmbeddings } from "../ingestion/embedder";
 import { getTranscript } from "../ingestion/transcript";
-import type { IngestStreamEvent } from "../types";
+import type { IngestStreamEvent, TextChunk } from "../types";
+import { formatTimestampRange } from "../timestamp";
 import { IngestStateAnnotation, type IngestState } from "./states";
 
 function emit(config: LangGraphRunnableConfig, event: IngestStreamEvent) {
@@ -25,6 +26,52 @@ function progress(
   },
 ) {
   emit(config, { type: "progress", ...update });
+}
+
+function embedTextForChunk(chunk: TextChunk): string {
+  const range = formatTimestampRange(chunk.startSeconds, chunk.endSeconds);
+  return `Video transcript segment [${range}]: ${chunk.text}`;
+}
+
+async function collectionNeedsFullReembed(
+  collectionName: string,
+  totalChunks: number,
+): Promise<boolean> {
+  const qdrant = getQdrantClient();
+  const exists = await qdrant.collectionExists(collectionName);
+  if (!exists.exists) {
+    return true;
+  }
+
+  const info = await qdrant.getCollection(collectionName);
+  const vectors = info.config?.params?.vectors;
+  const currentSize =
+    vectors && typeof vectors === "object" && "size" in vectors
+      ? vectors.size
+      : undefined;
+
+  if (currentSize !== EMBEDDING_DIMENSIONS) {
+    return true;
+  }
+
+  const scroll = await qdrant.scroll(collectionName, {
+    limit: 1,
+    with_payload: true,
+  });
+  const point = scroll.points[0];
+  if (!point?.payload) {
+    return true;
+  }
+
+  const payload = point.payload as {
+    embedding_model?: string;
+    total_chunks?: number;
+  };
+
+  return (
+    payload.embedding_model !== EMBEDDING_MODEL ||
+    payload.total_chunks !== totalChunks
+  );
 }
 
 async function extractTranscriptNode(
@@ -110,10 +157,14 @@ async function embedAndStoreNode(
   });
 
   try {
+    const needsFullReembed = await collectionNeedsFullReembed(collectionName, totalChunks);
     let existingCount = 0;
-    const exists = await qdrant.collectionExists(collectionName);
 
-    if (!exists.exists) {
+    if (needsFullReembed) {
+      const exists = await qdrant.collectionExists(collectionName);
+      if (exists.exists) {
+        await qdrant.deleteCollection(collectionName);
+      }
       await qdrant.createCollection(collectionName, {
         vectors: {
           size: EMBEDDING_DIMENSIONS,
@@ -121,25 +172,8 @@ async function embedAndStoreNode(
         },
       });
     } else {
-      const info = await qdrant.getCollection(collectionName);
-      const vectors = info.config?.params?.vectors;
-      const currentSize =
-        vectors && typeof vectors === "object" && "size" in vectors
-          ? vectors.size
-          : undefined;
-
-      if (currentSize !== EMBEDDING_DIMENSIONS) {
-        await qdrant.deleteCollection(collectionName);
-        await qdrant.createCollection(collectionName, {
-          vectors: {
-            size: EMBEDDING_DIMENSIONS,
-            distance: "Cosine",
-          },
-        });
-      } else {
-        const countResult = await qdrant.count(collectionName, { exact: true });
-        existingCount = countResult.count ?? 0;
-      }
+      const countResult = await qdrant.count(collectionName, { exact: true });
+      existingCount = countResult.count ?? 0;
     }
 
     if (existingCount >= totalChunks) {
@@ -168,7 +202,7 @@ async function embedAndStoreNode(
     const batchSize = QDRANT_UPSERT_BATCH_SIZE;
     for (let i = existingCount; i < totalChunks; i += batchSize) {
       const batchChunks = chunks.slice(i, i + batchSize);
-      const texts = batchChunks.map((chunk) => chunk.text);
+      const texts = batchChunks.map(embedTextForChunk);
       const embeddings = await generateEmbeddings(texts);
       const isLastBatch = i + batchChunks.length >= totalChunks;
 
@@ -183,6 +217,8 @@ async function embedAndStoreNode(
             start_seconds: batchChunks[index].startSeconds,
             end_seconds: batchChunks[index].endSeconds,
             chunk_index: batchChunks[index].chunkIndex,
+            embedding_model: EMBEDDING_MODEL,
+            total_chunks: totalChunks,
           },
         })),
       });

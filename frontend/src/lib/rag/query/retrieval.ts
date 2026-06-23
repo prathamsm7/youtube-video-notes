@@ -1,12 +1,14 @@
 import type { RetrieveContextResult } from "../types";
 import {
+  RETRIEVAL_CANDIDATE_LIMIT,
+  RETRIEVAL_CHUNK_LIMIT,
+} from "../constants";
+import {
   collectionExistsForVideo,
   collectionNameForVideo,
   getQdrantClient,
 } from "../clients/qdrant";
-import { embedQuery } from "../ingestion/embedder";
-
-const FALLBACK_CHUNK_LIMIT = 3;
+import { rerankByRelevance } from "./reranker";
 
 type QdrantPayload = {
   text?: string;
@@ -20,20 +22,31 @@ type ScoredPoint = {
   payload?: QdrantPayload | null;
 };
 
+function documentTextForRerank(point: ScoredPoint): string {
+  return point.payload?.text?.trim() || point.payload?.context_text?.trim() || "";
+}
+
 function logRetrievedChunks(
   videoId: string,
   searchQuery: string,
-  points: ScoredPoint[],
-  usedThreshold: boolean,
+  vectorCandidates: ScoredPoint[],
+  reranked: Array<{ point: ScoredPoint; vectorScore: number; rerankScore: number }>,
+  usedReranker: boolean,
 ) {
   console.log("[rag/retrieval] retrieved chunks", {
     videoId,
     searchQuery,
-    usedThreshold,
-    chunks: points.map((point) => ({
+    usedReranker,
+    vectorCandidates: vectorCandidates.map((point) => ({
       id: point.id,
-      score: point.score ?? null,
+      vectorScore: point.score ?? null,
       chunk_index: point.payload?.chunk_index ?? null,
+    })),
+    rerankedChunks: reranked.map((entry) => ({
+      id: entry.point.id,
+      vectorScore: entry.vectorScore,
+      rerankScore: entry.rerankScore,
+      chunk_index: entry.point.payload?.chunk_index ?? null,
     })),
   });
 }
@@ -46,23 +59,6 @@ function pointsToContext(points: ScoredPoint[]): RetrieveContextResult {
   return {
     context: parts.length ? parts.join("\n\n") : null,
     chunkCount: parts.length,
-  };
-}
-
-function filterPointsByThreshold(
-  points: ScoredPoint[],
-  limit: number,
-  threshold: number,
-): { points: ScoredPoint[]; usedThreshold: boolean } {
-  const aboveThreshold = points.filter((point) => (point.score ?? 0) >= threshold);
-
-  if (aboveThreshold.length) {
-    return { points: aboveThreshold.slice(0, limit), usedThreshold: true };
-  }
-
-  return {
-    points: points.slice(0, Math.min(FALLBACK_CHUNK_LIMIT, limit)),
-    usedThreshold: false,
   };
 }
 
@@ -107,8 +103,8 @@ export async function retrieveContextWithVector(
   videoId: string,
   searchQuery: string,
   queryVector: number[],
-  limit = 8,
-  threshold = 0.35,
+  limit = RETRIEVAL_CHUNK_LIMIT,
+  candidateLimit = RETRIEVAL_CANDIDATE_LIMIT,
 ): Promise<RetrieveContextResult> {
   if (!(await collectionExistsForVideo(videoId))) {
     return { context: null, chunkCount: 0 };
@@ -120,36 +116,48 @@ export async function retrieveContextWithVector(
   try {
     const results = await client.query(collectionName, {
       query: queryVector,
-      limit,
+      limit: candidateLimit,
       with_payload: true,
     });
 
-    const rawPoints = (results.points ?? []) as ScoredPoint[];
-    const { points, usedThreshold } = filterPointsByThreshold(rawPoints, limit, threshold);
+    const candidates = (results.points ?? []) as ScoredPoint[];
+    if (!candidates.length) {
+      return { context: null, chunkCount: 0 };
+    }
 
-    logRetrievedChunks(videoId, searchQuery, points, usedThreshold);
+    let reranked: Array<{ point: ScoredPoint; vectorScore: number; rerankScore: number }>;
+    let usedReranker = true;
 
-    return pointsToContext(points);
+    try {
+      const rerankResults = await rerankByRelevance(
+        searchQuery,
+        candidates,
+        documentTextForRerank,
+        limit,
+      );
+
+      reranked = rerankResults.map((result) => ({
+        point: result.item,
+        vectorScore: result.item.score ?? 0,
+        rerankScore: result.rerankScore,
+      }));
+    } catch (error) {
+      console.error("[rag/retrieval] reranker failed, using vector order", error);
+      usedReranker = false;
+      reranked = candidates.slice(0, limit).map((point) => ({
+        point,
+        vectorScore: point.score ?? 0,
+        rerankScore: point.score ?? 0,
+      }));
+    }
+
+    logRetrievedChunks(videoId, searchQuery, candidates, reranked, usedReranker);
+
+    return pointsToContext(reranked.map((entry) => entry.point));
   } catch (error) {
     console.error("[rag/retrieval] Qdrant search error", { collectionName, error });
     return { context: null, chunkCount: 0 };
   }
 }
 
-export async function retrieveContext(
-  videoId: string,
-  searchQuery: string,
-  limit = 8,
-  threshold = 0.35,
-): Promise<RetrieveContextResult> {
-  const [queryVector, exists] = await Promise.all([
-    embedQuery(searchQuery),
-    collectionExistsForVideo(videoId),
-  ]);
 
-  if (!exists) {
-    return { context: null, chunkCount: 0 };
-  }
-
-  return retrieveContextWithVector(videoId, searchQuery, queryVector, limit, threshold);
-}
