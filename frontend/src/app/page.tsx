@@ -67,7 +67,7 @@ export default function HomePage() {
     setProgress({ processed: 0, total: 0 });
 
     try {
-      const res = await apiFetch("/api/videos/process/stream", {
+      const res = await apiFetch("/api/sources/video/process/stream", {
         method: "POST",
         body: JSON.stringify({ youtube_url: youtubeUrl }),
       });

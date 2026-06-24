@@ -3,7 +3,7 @@
 import React, { useMemo } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
-import { CITATION_RANGE_RE, parseTimestamp } from "@/lib/rag/timestamp";
+import { CITATION_RANGE_RE, parseTimestamp } from "@/lib/sources/video";
 
 const citationClassName =
   "citation-timestamp text-blue-400 hover:text-blue-300 hover:underline font-normal inline whitespace-nowrap align-baseline ml-1 p-0 m-0 border-0 bg-transparent cursor-pointer";

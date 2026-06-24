@@ -9,8 +9,8 @@ import {
   saveMessage,
   toApiRole,
 } from "@/lib/chats";
-import { STREAM_HEADERS, sseComment, sseEvent, streamQueryResponse } from "@/lib/rag";
-import { setVideoSummary } from "@/lib/videos";
+import { sseComment, sseEvent, STREAM_HEADERS } from "@/lib/core";
+import { setVideoSummary, streamVideoQuery } from "@/lib/sources/video";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -114,7 +114,7 @@ export async function POST(
 
         send({ type: "started", question });
 
-        for await (const event of streamQueryResponse(
+        for await (const event of streamVideoQuery(
           videoId,
           question,
           chatHistory,
