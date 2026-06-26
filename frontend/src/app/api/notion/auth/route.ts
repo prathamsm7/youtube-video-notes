@@ -5,12 +5,8 @@ import { getCurrentUser } from "@/lib/auth";
 /**
  * POST /api/notion/auth
  *
- * Receives the temporary `code` from the Notion OAuth callback,
- * exchanges it for a long-lived access token using the client credentials
- * stored server-side, then returns the workspace name to the frontend.
- *
- * The access_token MUST be persisted in your database (keyed by user ID)
- * before returning. Add that step in the TODO below.
+ * Exchanges the Notion OAuth code for a workspace access token and stores it
+ * on the authenticated user's NotionProfile.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -29,20 +25,14 @@ export async function POST(req: NextRequest) {
     const redirectUri = process.env.NOTION_OAUTH_REDIRECT_URI;
 
     if (!clientId || !clientSecret || !redirectUri) {
-      console.error(
-        "[notion/auth] Missing server-side env vars: " +
-          "NOTION_OAUTH_CLIENT_ID, NOTION_OAUTH_CLIENT_SECRET, NOTION_OAUTH_REDIRECT_URI",
-      );
+      console.error("[notion/auth] Missing Notion OAuth environment variables");
       return NextResponse.json(
         { success: false, error: "Server misconfiguration." },
         { status: 500 },
       );
     }
 
-    // Base64-encode "clientId:clientSecret" for HTTP Basic auth
-    const encoded = Buffer.from(`${clientId}:${clientSecret}`).toString(
-      "base64",
-    );
+    const encoded = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
     const tokenRes = await fetch("https://api.notion.com/v1/oauth/token", {
       method: "POST",
@@ -58,17 +48,27 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    const tokenData = await tokenRes.json();
-    console.log("🚀 ~ POST ~ tokenData:", tokenData);
+    const tokenData = (await tokenRes.json()) as {
+      access_token?: string;
+      bot_id?: string;
+      workspace_id?: string;
+      workspace_name?: string;
+      error?: string;
+      error_description?: string;
+    };
 
     if (!tokenRes.ok) {
-      console.error("[notion/auth] Token exchange failed:", tokenData);
+      console.error(
+        "[notion/auth] Token exchange failed:",
+        tokenRes.status,
+        tokenData.error ?? tokenData.error_description ?? "unknown error",
+      );
       return NextResponse.json(
         {
           success: false,
           error:
-            tokenData?.error_description ??
-            tokenData?.error ??
+            tokenData.error_description ??
+            tokenData.error ??
             "Failed to exchange code for token.",
         },
         { status: tokenRes.status },
@@ -77,7 +77,13 @@ export async function POST(req: NextRequest) {
 
     const { access_token, bot_id, workspace_id, workspace_name } = tokenData;
 
-    // ── Persist the token ──────────────────────────────────────────────────
+    if (!access_token) {
+      return NextResponse.json(
+        { success: false, error: "Notion did not return an access token." },
+        { status: 502 },
+      );
+    }
+
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
@@ -99,18 +105,15 @@ export async function POST(req: NextRequest) {
         botId: bot_id,
       },
     });
-    // ──────────────────────────────────────────────────────────────────────
 
-    console.log(
-      `[notion/auth] Connected workspace "${workspace_name}" (id: ${workspace_id})`,
-    );
+    console.log(`[notion/auth] Connected workspace "${workspace_name ?? "unknown"}"`);
 
     return NextResponse.json({
       success: true,
       workspace_name,
     });
   } catch (err) {
-    console.error("[notion/auth] Unexpected error:", err);
+    console.error("[notion/auth] Unexpected error:", err instanceof Error ? err.message : "unknown");
     return NextResponse.json(
       { success: false, error: "Internal server error." },
       { status: 500 },

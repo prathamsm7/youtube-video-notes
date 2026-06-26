@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 interface User {
@@ -10,10 +10,9 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
   isLoading: boolean;
-  login: (token: string, userData: User) => void;
-  logout: () => void;
+  login: (userData: User) => void;
+  logout: () => Promise<void>;
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }
 
@@ -21,58 +20,72 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    // Load auth data from localStorage on mount
-    const savedToken = localStorage.getItem("token");
-    const savedUser = localStorage.getItem("user");
-
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
-    }
-    setIsLoading(false);
+    fetch("/api/auth/me", { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json() as Promise<{ user: User }>;
+      })
+      .then((data) => {
+        if (data?.user) {
+          setUser(data.user);
+        }
+      })
+      .catch(() => {
+        setUser(null);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
   }, []);
 
-  const login = (newToken: string, userData: User) => {
-    setToken(newToken);
+  const login = (userData: User) => {
     setUser(userData);
-    localStorage.setItem("token", newToken);
-    localStorage.setItem("user", JSON.stringify(userData));
     router.push("/");
   };
 
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    router.push("/login");
-  };
-
-  const apiFetch = async (url: string, options: RequestInit = {}) => {
-    const isFormData =
-      typeof FormData !== "undefined" && options.body instanceof FormData;
-    const headers: HeadersInit = {
-      ...options.headers,
-      ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
-
-    const response = await fetch(url, { ...options, headers });
-    
-    if (response.status === 401 && !url.includes("/api/auth")) {
-      logout();
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      setUser(null);
+      router.push("/login");
     }
-    
-    return response;
-  };
+  }, [router]);
+
+  const apiFetch = useCallback(
+    async (url: string, options: RequestInit = {}) => {
+      const isFormData =
+        typeof FormData !== "undefined" && options.body instanceof FormData;
+      const headers: HeadersInit = {
+        ...options.headers,
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      };
+
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+
+      if (response.status === 401 && !url.includes("/api/auth")) {
+        setUser(null);
+        router.push("/login");
+      }
+
+      return response;
+    },
+    [router],
+  );
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout, apiFetch }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, apiFetch }}>
       {children}
     </AuthContext.Provider>
   );

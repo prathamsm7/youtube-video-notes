@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { SignJWT } from "jose";
 import { prisma } from "@/lib/db";
-
-if (!process.env.JWT_SECRET) {
-  throw new Error("JWT_SECRET environment variable is required. Set it in .env.local");
-}
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
+import { createSessionToken, setAuthCookie } from "@/lib/auth-session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,7 +11,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: "Missing email or password" }, { status: 400 });
     }
 
-    // Check if user exists
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });
@@ -25,10 +19,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: "Email already registered" }, { status: 400 });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
     const newUser = await prisma.user.create({
       data: {
         email,
@@ -36,19 +28,14 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Create JWT
-    const token = await new SignJWT({ sub: newUser.id.toString() })
-      .setProtectedHeader({ alg: "HS256" })
-      .setExpirationTime("7d")
-      .sign(JWT_SECRET);
-
-    return NextResponse.json({
-      access_token: token,
-      token_type: "bearer",
+    const token = await createSessionToken(newUser.id);
+    const response = NextResponse.json({
       user: { id: newUser.id, email: newUser.email },
     });
+    setAuthCookie(response, token);
+    return response;
   } catch (error) {
-    console.error("Signup error:", error);
+    console.error("Signup error:", error instanceof Error ? error.message : "unknown");
     return NextResponse.json({ detail: "Internal server error" }, { status: 500 });
   }
 }
