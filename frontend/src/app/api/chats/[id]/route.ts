@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getChatMetadataForUser } from "@/lib/chats";
+import { getChatForUser, serializeChatDetail } from "@/lib/chats";
 
 export async function GET(
   req: NextRequest,
@@ -11,22 +11,12 @@ export async function GET(
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 
-  const { id } = await params;
-  const chat = await getChatMetadataForUser(id, user.id);
+  const { id: chatId } = await params;
+  const chat = await getChatForUser(chatId, user.id);
 
   if (!chat) {
     return NextResponse.json({ detail: "Chat not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
-    id: chat.id,
-    title: chat.title || chat.video.title,
-    updatedAt: chat.updatedAt,
-    video: {
-      id: chat.video.id,
-      youtubeId: chat.video.youtubeId,
-      title: chat.video.title,
-      status: chat.video.status,
-    },
-  });
+  return NextResponse.json(serializeChatDetail(chat));
 }

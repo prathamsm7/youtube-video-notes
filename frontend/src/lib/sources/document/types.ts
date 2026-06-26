@@ -17,6 +17,18 @@ export type ChatHistoryMessage = {
 
 export type QueryIntent = "SUMMARY" | "QA";
 
+export type AnalyzeQueryResult = {
+  intent: QueryIntent;
+  search_query: string;
+  language: string;
+  needs_chat_history: boolean;
+};
+
+export type RetrieveContextResult = {
+  context: string | null;
+  chunkCount: number;
+};
+
 export type DocumentQueryStreamEvent =
   | {
       kind: "status";
@@ -27,6 +39,11 @@ export type DocumentQueryStreamEvent =
   | { kind: "meta"; payload: { intent: QueryIntent; summary_generated: boolean } };
 
 export type DocumentIngestStreamEvent =
+  | {
+      type: "started";
+      document_id: string;
+      file_name: string;
+    }
   | {
       type: "progress";
       status: string;

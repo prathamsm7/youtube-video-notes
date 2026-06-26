@@ -26,7 +26,30 @@ const VIDEO_STEPS = [
   "Ready to chat!",
 ];
 
-function jobPhaseToStep(phase: JobStatus): number {
+const PDF_STEPS = [
+  "Extracting document content...",
+  "Summarizing chunks with AI...",
+  "Embedding and indexing...",
+  "Processing complete!",
+];
+
+function jobPhaseToStep(phase: JobStatus, type: SourceType): number {
+  if (type === "pdf") {
+    switch (phase) {
+      case "extracting":
+      case "chunking":
+        return 0;
+      case "embedding":
+        return 1;
+      case "processing":
+        return 2;
+      case "completed":
+        return 3;
+      default:
+        return 0;
+    }
+  }
+
   switch (phase) {
     case "extracting":
       return 0;
@@ -126,10 +149,83 @@ export default function HomePage() {
     }
   };
 
+  const processDocument = async (file: File) => {
+    setView("processing");
+    setProcessingTitle(file.name);
+    setProcessingType("pdf");
+    setJobPhase("extracting");
+    setError(null);
+    setProgress({ processed: 0, total: 0 });
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await apiFetch("/api/sources/document/process/stream", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to process PDF");
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      if (!reader) throw new Error("Streaming not supported");
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const rawEvent of events) {
+          const dataLine = rawEvent.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+
+          const payload = JSON.parse(dataLine.slice(6));
+
+          if (payload.type === "started") {
+            setJobPhase("extracting");
+            if (payload.file_name) setProcessingTitle(payload.file_name);
+          } else if (payload.type === "progress" && payload.status) {
+            setJobPhase(payload.status as JobStatus);
+            if (payload.total_chunks) {
+              setProgress({
+                processed: payload.processed_chunks || 0,
+                total: payload.total_chunks,
+              });
+            }
+          } else if (payload.type === "complete" && payload.chatId) {
+            setJobPhase("completed");
+            if (payload.file_name) setProcessingTitle(payload.file_name);
+            setTimeout(() => router.push(`/chat/${payload.chatId}`), 600);
+            return;
+          } else if (payload.type === "error") {
+            setError(payload.error || "Processing failed");
+            setJobPhase("failed");
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+      setJobPhase("failed");
+    }
+  };
+
   const handleProcessStart = useCallback(
-    (type: SourceType, input: string) => {
-      if (type === "video") {
+    (type: SourceType, input: string | File) => {
+      if (type === "video" && typeof input === "string") {
         processVideo(input);
+      } else if (type === "pdf" && input instanceof File) {
+        processDocument(input);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,7 +241,13 @@ export default function HomePage() {
   }
 
   const progressLabel =
-    progress.total > 0 ? `${progress.processed} / ${progress.total} chunks` : undefined;
+    progress.total > 0
+      ? processingType === "pdf"
+        ? `${progress.processed} / ${progress.total} chunks`
+        : `${progress.processed} / ${progress.total} chunks`
+      : undefined;
+
+  const processingSteps = processingType === "pdf" ? PDF_STEPS : VIDEO_STEPS;
 
   return (
     <AppShell>
@@ -162,8 +264,8 @@ export default function HomePage() {
         <ProcessingScreen
           type={processingType}
           title={processingTitle}
-          currentStep={jobPhaseToStep(jobPhase)}
-          steps={VIDEO_STEPS}
+          currentStep={jobPhaseToStep(jobPhase, processingType)}
+          steps={processingSteps}
           isComplete={jobPhase === "completed"}
           error={jobPhase === "failed" ? error : null}
           progressLabel={progressLabel}

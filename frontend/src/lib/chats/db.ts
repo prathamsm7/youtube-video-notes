@@ -1,44 +1,76 @@
 import { MessageRole } from "@prisma/client";
-import { prisma } from "./db";
+import { prisma } from "../db";
+import type { ChatWithSources } from "./types";
 
-const WELCOME_MESSAGE =
+const VIDEO_WELCOME_MESSAGE =
   "I've successfully transcribed and analyzed the video! What would you like to know about it?";
 
-export async function createChatWithWelcome(
-  userId: number,
-  videoId: string,
-  title: string,
-) {
+const DOCUMENT_WELCOME_MESSAGE =
+  "I've successfully extracted and indexed your document! Ask me anything about its text, tables, or visual content.";
+
+const chatWithSourcesInclude = {
+  video: true,
+  document: true,
+} as const;
+
+const WELCOME_MESSAGES = {
+  video: VIDEO_WELCOME_MESSAGE,
+  document: DOCUMENT_WELCOME_MESSAGE,
+} as const;
+
+type CreateChatWithWelcomeInput =
+  | {
+      userId: number;
+      title: string;
+      source: { kind: "video"; videoId: string };
+    }
+  | {
+      userId: number;
+      title: string;
+      source: { kind: "document"; documentId: string };
+    };
+
+const chatCreateInclude = {
+  ...chatWithSourcesInclude,
+  messages: { orderBy: { createdAt: "asc" as const } },
+};
+
+export async function createChatWithWelcome(input: CreateChatWithWelcomeInput) {
+  const { userId, title, source } = input;
+
   return prisma.chat.create({
     data: {
       userId,
-      videoId,
       title,
+      ...(source.kind === "video"
+        ? { videoId: source.videoId }
+        : { documentId: source.documentId }),
       messages: {
         create: {
           role: MessageRole.ASSISTANT,
-          content: WELCOME_MESSAGE,
+          content: WELCOME_MESSAGES[source.kind],
         },
       },
     },
-    include: { video: true, messages: { orderBy: { createdAt: "asc" } } },
+    include: chatCreateInclude,
   });
 }
 
-export async function listUserChats(userId: number) {
+export async function listUserChats(userId: number): Promise<ChatWithSources[]> {
   return prisma.chat.findMany({
     where: { userId },
     orderBy: { updatedAt: "desc" },
-    include: {
-      video: true,
-    },
+    include: chatWithSourcesInclude,
   });
 }
 
-export async function getChatMetadataForUser(chatId: string, userId: number) {
+export async function getChatForUser(
+  chatId: string,
+  userId: number,
+): Promise<ChatWithSources | null> {
   return prisma.chat.findFirst({
     where: { id: chatId, userId },
-    include: { video: true },
+    include: chatWithSourcesInclude,
   });
 }
 
@@ -53,10 +85,6 @@ export async function getChatMessagesForUser(chatId: string, userId: number) {
     where: { chatId },
     orderBy: { createdAt: "asc" },
   });
-}
-
-export async function getChatForUser(chatId: string, userId: number) {
-  return getChatMetadataForUser(chatId, userId);
 }
 
 export async function getRecentMessages(chatId: string, limit = 6) {

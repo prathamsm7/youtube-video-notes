@@ -115,6 +115,43 @@ export async function generateWithFallback(
   throw lastError instanceof Error ? lastError : new Error("LLM generation failed");
 }
 
+export async function generateStructuredWithFallback<T extends Record<string, unknown>>(
+  systemPrompt: string,
+  userPrompt: string,
+  schema: Record<string, unknown>,
+  schemaName: string,
+  primaryModel: string,
+  fallbackModel: string,
+  temperature = 0,
+): Promise<T> {
+  const models = [primaryModel, fallbackModel];
+  let lastError: unknown;
+
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const llm = createOpenAIChatModel(model, temperature, { nostream: true });
+        const structured = llm.withStructuredOutput(schema, {
+          name: schemaName,
+          method: "jsonSchema",
+          strict: true,
+        });
+        return (await structured.invoke([
+          new SystemMessage(systemPrompt.trim()),
+          new HumanMessage(userPrompt.trim()),
+        ])) as T;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await sleep(2 ** attempt * 1000);
+        }
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Structured LLM generation failed");
+}
+
 export async function stream(
   systemPrompt: string,
   userPrompt: string,

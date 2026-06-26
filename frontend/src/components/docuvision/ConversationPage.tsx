@@ -29,6 +29,7 @@ interface ConversationPageProps {
   savingToNotionId?: string | null;
   messagesLoading?: boolean;
   chatsLoading?: boolean;
+  showVideoPanel?: boolean;
 }
 
 export function ConversationPage({
@@ -50,6 +51,7 @@ export function ConversationPage({
   savingToNotionId,
   messagesLoading = false,
   chatsLoading = false,
+  showVideoPanel = false,
 }: ConversationPageProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -207,13 +209,21 @@ export function ConversationPage({
             onSendMessage={onSendMessage}
             disabled={inputDisabled || isThinking || messagesLoading}
             placeholder={
-              inputDisabled ? "Video is still processing..." : "Ask anything about the video..."
+              inputDisabled
+                ? source.type === "video"
+                  ? "Video is still processing..."
+                  : "Document is still processing..."
+                : source.type === "video"
+                  ? "Ask anything about the video..."
+                  : "Ask anything about the document..."
             }
           />
         </footer>
       </div>
 
-      <VideoPanel title={source.title} sidebarCollapsed={!isSidebarOpen} />
+      {showVideoPanel && (
+        <VideoPanel title={source.title} sidebarCollapsed={!isSidebarOpen} />
+      )}
     </div>
   );
 }

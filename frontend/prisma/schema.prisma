@@ -33,32 +33,55 @@ enum VideoStatus {
   FAILED
 }
 
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
 model Video {
-  id                  String      @id @default(cuid())
-  youtubeId           String      @unique
-  title               String?
-  url                 String?
-  status              VideoStatus @default(PENDING)
-  totalChunks         Int?
-  summary             String?     @db.Text
-  summaryGeneratedAt  DateTime?
-  errorMessage        String?
-  processedAt         DateTime?
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
-  chats               Chat[]
+  id                 String      @id @default(cuid())
+  youtubeId          String      @unique
+  title              String?
+  url                String?
+  status             VideoStatus @default(PENDING)
+  totalChunks        Int?
+  summary            String?     @db.Text
+  summaryGeneratedAt DateTime?
+  errorMessage       String?
+  processedAt        DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  chats              Chat[]
+}
+
+model Document {
+  id                 String         @id @default(cuid())
+  fileName           String
+  status             DocumentStatus @default(PENDING)
+  totalChunks        Int?
+  summary            String?        @db.Text
+  summaryGeneratedAt DateTime?
+  errorMessage       String?
+  processedAt        DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  chats              Chat[]
 }
 
 model Chat {
-  id        String    @id @default(cuid())
-  userId    Int
-  user      User      @relation(fields: [userId], references: [id])
-  videoId   String
-  video     Video     @relation(fields: [videoId], references: [id])
-  title     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  messages  Message[]
+  id         String    @id @default(cuid())
+  userId     Int
+  user       User      @relation(fields: [userId], references: [id])
+  videoId    String?
+  video      Video?    @relation(fields: [videoId], references: [id])
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
+  title      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  messages   Message[]
 
   @@index([userId, updatedAt])
 }

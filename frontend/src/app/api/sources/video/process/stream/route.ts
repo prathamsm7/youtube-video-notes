@@ -23,7 +23,11 @@ async function handleIngestComplete(
   totalChunks: number,
 ): Promise<string> {
   await setVideoReady(videoDbId, totalChunks);
-  const chat = await createChatWithWelcome(userId, videoDbId, title);
+  const chat = await createChatWithWelcome({
+    userId,
+    title,
+    source: { kind: "video", videoId: videoDbId },
+  });
   return chat.id;
 }
 
@@ -51,7 +55,11 @@ export async function POST(req: NextRequest) {
   const video = await ensureVideo(youtubeId, youtubeUrl, title);
 
   if (video.status === VideoStatus.READY) {
-    const chat = await createChatWithWelcome(user.id, video.id, title);
+    const chat = await createChatWithWelcome({
+      userId: user.id,
+      title,
+      source: { kind: "video", videoId: video.id },
+    });
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(

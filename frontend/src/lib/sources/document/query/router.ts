@@ -16,7 +16,7 @@ function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
 }
 
 function buildSystemPrompt(): string {
-  return `You are an expert query router, query rewriter and language detector.
+  return `You are an expert query router, query rewriter and language detector for document Q&A.
 Your task is to classify intent, rewrite the query for retrieval, detect language, and decide if chat history is required.
 
 Search query rules:
@@ -25,22 +25,18 @@ Search query rules:
 - Use provided chat history to resolve pronouns and understand the context of the query.
 
 Intent rules:
-- SUMMARY: ONLY when the user explicitly asks for a full-video overview (summarize, recap, main points, etc.)
-- QA: ANY specific question about the video — what/how/why/which/step/part/compare/explain a topic
+- SUMMARY: ONLY when the user explicitly asks for a full-document overview (summarize, recap, main points, etc.)
+- QA: ANY specific question about the document — what/how/why/which/section/table/chart/compare/explain a topic
 - When unsure → QA
 
 SUMMARY examples:
-- "summarize this video" → intent SUMMARY
+- "summarize this document" → intent SUMMARY
 - "give me the main points" → intent SUMMARY
 
 QA examples:
-- "what is the second step in transformer architecture" → intent QA
-- "how does attention work" → intent QA
-- "explain it simpler" (with prior chat about transformers) → intent QA, needs_chat_history true
-
-needs_chat_history examples:
-- "shorten your last answer" → needs_chat_history true
-- "explain your second bullet" → needs_chat_history true`;
+- "what does table 2 show" → intent QA
+- "explain the chart on page 5" → intent QA
+- "explain it simpler" (with prior chat) → intent QA, needs_chat_history true`;
 }
 
 export async function analyzeQuery(
@@ -59,7 +55,7 @@ export async function analyzeQuery(
       buildSystemPrompt(),
       userPrompt,
       QUERY_ROUTER_RESPONSE_SCHEMA,
-      "video_query_router",
+      "document_query_router",
       CHAT_MODEL_FAST,
       CHAT_MODEL_STRONG,
       0,
@@ -67,7 +63,7 @@ export async function analyzeQuery(
 
     return normalizeRouterResult(result, query, chatHistory.length);
   } catch (error) {
-    console.warn("[video/query] analysis error:", error);
+    console.warn("[document/query] analysis error:", error);
     return fallbackRouterResult(query, chatHistory.length);
   }
 }

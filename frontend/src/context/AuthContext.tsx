@@ -54,11 +54,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const apiFetch = async (url: string, options: RequestInit = {}) => {
-    // If the URL is external, use it as is, otherwise prefix with /api if needed
-    // But since we are moving everything to Next.js API routes, we can just use the path
-    const headers = {
+    const isFormData =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
+    const headers: HeadersInit = {
       ...options.headers,
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 

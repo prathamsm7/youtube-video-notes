@@ -10,13 +10,17 @@ import React, {
   ReactNode,
 } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { SourceType } from "@/types/ui";
 
 export type ChatListItem = {
   id: string;
   title: string;
-  videoTitle: string;
-  youtubeId: string;
-  videoStatus: string;
+  sourceType: SourceType;
+  videoTitle: string | null;
+  youtubeId: string | null;
+  videoStatus: string | null;
+  documentFileName: string | null;
+  documentStatus: string | null;
   updatedAt: string;
 };
 

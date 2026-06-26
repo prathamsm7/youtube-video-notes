@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
-import { MessageRole, VideoStatus } from "@prisma/client";
+import { DocumentStatus, VideoStatus } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import {
+  createDocumentAnswerStream,
+  createVideoAnswerStream,
   getChatForUser,
   getChatMessagesForUser,
-  getRecentMessages,
-  saveMessage,
-  toApiRole,
+  serializeMessage,
+  sseResponse,
 } from "@/lib/chats";
-import { sseComment, sseEvent, STREAM_HEADERS } from "@/lib/core";
-import { setVideoSummary, streamVideoQuery } from "@/lib/sources/video";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -32,28 +30,8 @@ export async function GET(
   }
 
   return NextResponse.json({
-    messages: messages.map((m) => ({
-      id: m.id,
-      role: m.role.toLowerCase(),
-      content: m.content,
-      createdAt: m.createdAt,
-    })),
+    messages: messages.map(serializeMessage),
   });
-}
-
-async function saveAssistantMessage(
-  chatId: string,
-  videoDbId: string,
-  answer: string,
-  summaryGenerated: boolean,
-) {
-  if (!answer.trim()) {
-    return;
-  }
-  await saveMessage(chatId, MessageRole.ASSISTANT, answer);
-  if (summaryGenerated) {
-    await setVideoSummary(videoDbId, answer);
-  }
 }
 
 export async function POST(
@@ -72,96 +50,53 @@ export async function POST(
     return NextResponse.json({ detail: "Chat not found" }, { status: 404 });
   }
 
-  if (chat.video.status !== VideoStatus.READY) {
-    return NextResponse.json(
-      { detail: "Video is not ready for chat yet" },
-      { status: 400 },
-    );
-  }
-
   const { content } = await req.json();
   if (!content?.trim()) {
     return NextResponse.json({ detail: "Message cannot be empty" }, { status: 400 });
   }
 
   const question = content.trim();
-  const videoId = chat.video.youtubeId;
-  const videoDbId = chat.video.id;
-  const cachedSummary = chat.video.summary ?? null;
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      const send = (data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(sseEvent(data)));
-      };
+  // --- Document chat ---
+  if (chat.documentId && chat.document) {
+    if (chat.document.status !== DocumentStatus.READY) {
+      return NextResponse.json(
+        { detail: "Document is not ready for chat yet" },
+        { status: 400 },
+      );
+    }
 
-      let answer = "";
-      let summaryGenerated = false;
+    const stream = createDocumentAnswerStream({
+      userId: user.id,
+      chatId,
+      documentId: chat.document.id,
+      cachedSummary: chat.document.summary,
+      question,
+    });
 
-      try {
-        controller.enqueue(encoder.encode(sseComment("open")));
+    return sseResponse(stream);
+  }
 
-        const [history] = await Promise.all([
-          getRecentMessages(chatId, 6),
-          saveMessage(chatId, MessageRole.USER, question),
-        ]);
+  // --- Video chat ---
+  if (chat.videoId && chat.video) {
+    if (chat.video.status !== VideoStatus.READY) {
+      return NextResponse.json(
+        { detail: "Video is not ready for chat yet" },
+        { status: 400 },
+      );
+    }
 
-        const chatHistory = history.map((m) => ({
-          role: toApiRole(m.role),
-          content: m.content,
-        }));
+    const stream = createVideoAnswerStream({
+      userId: user.id,
+      chatId,
+      videoDbId: chat.video.id,
+      youtubeId: chat.video.youtubeId,
+      cachedSummary: chat.video.summary,
+      question,
+    });
 
-        send({ type: "started", question });
+    return sseResponse(stream);
+  }
 
-        for await (const event of streamVideoQuery(
-          videoId,
-          question,
-          chatHistory,
-          cachedSummary,
-          { userId: user.id, chatId },
-        )) {
-          if (event.kind === "status") {
-            send({
-              type: "status",
-              phase: event.phase,
-              ...(event.total_chunks !== undefined
-                ? { total_chunks: event.total_chunks }
-                : {}),
-            });
-          } else if (event.kind === "token") {
-            answer += event.content;
-            send({ type: "token", content: event.content });
-          } else if (event.kind === "meta") {
-            summaryGenerated = event.payload.summary_generated;
-          }
-        }
-
-        send({ type: "done" });
-        controller.close();
-
-        after(async () => {
-          try {
-            await saveAssistantMessage(chatId, videoDbId, answer, summaryGenerated);
-          } catch (error) {
-            console.error("Failed to save assistant message:", error);
-          }
-        });
-      } catch (error) {
-        console.error("Ask stream error:", error);
-        send({
-          type: "error",
-          error: error instanceof Error ? error.message : "Failed to generate response",
-        });
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      ...STREAM_HEADERS,
-    },
-  });
+  return NextResponse.json({ detail: "Chat has no linked source" }, { status: 400 });
 }

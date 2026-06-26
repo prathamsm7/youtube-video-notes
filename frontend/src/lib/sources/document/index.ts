@@ -1,5 +1,14 @@
-// Document ingest/query pipelines will be implemented here.
-// This module is intentionally separate from sources/video.
-
-export type { DocumentIngestStreamEvent, DocumentQueryStreamEvent } from "./types";
+export type {
+  ChatHistoryMessage,
+  DocumentIngestStreamEvent,
+  DocumentQueryStreamEvent,
+} from "./types";
 export { collectionNameForDocument } from "./collection";
+export { streamDocumentIngest, streamDocumentQuery } from "./runner";
+export {
+  createDocument,
+  setDocumentFailed,
+  setDocumentProcessing,
+  setDocumentReady,
+  setDocumentSummary,
+} from "./db";

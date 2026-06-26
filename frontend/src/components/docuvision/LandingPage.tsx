@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   UploadCloud,
@@ -17,8 +17,10 @@ import { SourceType } from "@/types/ui";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
 
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
+
 interface LandingPageProps {
-  onProcessStart: (type: SourceType, linkOrFile: string) => void;
+  onProcessStart: (type: SourceType, input: string | File) => void;
   isDark: boolean;
   onThemeToggle: () => void;
   error?: string | null;
@@ -34,12 +36,37 @@ export function LandingPage({
   const [videoUrl, setVideoUrl] = useState("");
   const [isHoveringDrop, setIsHoveringDrop] = useState(false);
   const [pdfNotice, setPdfNotice] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const selectPdfFile = (file: File | null | undefined) => {
+    if (!file) return;
+
+    const isPdf =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setPdfNotice("Please upload a PDF file.");
+      setSelectedFile(null);
+      return;
+    }
+
+    if (file.size > MAX_PDF_BYTES) {
+      setPdfNotice("PDF must be 50MB or smaller.");
+      setSelectedFile(null);
+      return;
+    }
+
+    setPdfNotice(null);
+    setSelectedFile(file);
+  };
 
   const handleStart = () => {
     if (activeTab === "video" && videoUrl) {
       onProcessStart("video", videoUrl);
+    } else if (activeTab === "pdf" && selectedFile) {
+      onProcessStart("pdf", selectedFile);
     } else if (activeTab === "pdf") {
-      setPdfNotice("PDF upload is coming soon. Use the Video URL tab for now.");
+      setPdfNotice("Select a PDF file to continue.");
     }
   };
 
@@ -142,6 +169,7 @@ export function LandingPage({
                 onClick={() => {
                   setActiveTab("video");
                   setPdfNotice(null);
+                  setSelectedFile(null);
                 }}
                 className={cn(
                   "flex-1 py-4 px-6 text-sm font-medium flex items-center justify-center gap-2 transition-colors border-b-2",
@@ -153,7 +181,10 @@ export function LandingPage({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab("pdf")}
+                onClick={() => {
+                  setActiveTab("pdf");
+                  setPdfNotice(null);
+                }}
                 className={cn(
                   "flex-1 py-4 px-6 text-sm font-medium flex items-center justify-center gap-2 transition-colors border-b-2",
                   activeTab === "pdf" ? tabActive : cn("border-transparent", tabIdle),
@@ -212,6 +243,16 @@ export function LandingPage({
                     exit={{ opacity: 0, x: -10 }}
                     className="space-y-4"
                   >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        selectPdfFile(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
                     <div
                       onDragOver={(e) => {
                         e.preventDefault();
@@ -221,7 +262,7 @@ export function LandingPage({
                       onDrop={(e) => {
                         e.preventDefault();
                         setIsHoveringDrop(false);
-                        handleStart();
+                        selectPdfFile(e.dataTransfer.files?.[0]);
                       }}
                       className={cn(
                         "border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer",
@@ -231,7 +272,7 @@ export function LandingPage({
                             ? "border-white/20 hover:border-violet-500 hover:bg-slate-800/60"
                             : "border-slate-300 hover:border-violet-400",
                       )}
-                      onClick={handleStart}
+                      onClick={() => fileInputRef.current?.click()}
                     >
                       <UploadCloud
                         className={cn(
@@ -240,10 +281,23 @@ export function LandingPage({
                         )}
                       />
                       <p className={cn("font-medium", heading)}>
-                        Click to upload or drag and drop
+                        {selectedFile ? selectedFile.name : "Click to upload or drag and drop"}
                       </p>
-                      <p className={cn("text-sm mt-1", body)}>PDF up to 50MB</p>
+                      <p className={cn("text-sm mt-1", body)}>
+                        {selectedFile
+                          ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`
+                          : "PDF up to 50MB"}
+                      </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={handleStart}
+                      disabled={!selectedFile}
+                      className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-all shadow-lg shadow-violet-600/30 flex items-center justify-center gap-2 ml-auto"
+                    >
+                      Process & Index
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
