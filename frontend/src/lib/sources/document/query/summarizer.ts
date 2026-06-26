@@ -1,9 +1,5 @@
-import { generateWithFallback, stream } from "@/lib/core/ai-handler";
-import {
-  CHAT_MODEL_FAST,
-  CHAT_MODEL_STRONG,
-  SUMMARY_MAP_CONCURRENCY,
-} from "@/lib/core/rag/constants";
+import { generate, stream } from "@/lib/core/ai-handler";
+import { CHAT_MODEL_FAST, SUMMARY_MAP_CONCURRENCY } from "@/lib/core/rag/constants";
 import { getAllChunks } from "./retrieval";
 
 async function summarizeChunk(chunkText: string, index: number): Promise<string> {
@@ -13,13 +9,7 @@ Do not add extra information.`;
 
   const userPrompt = `Section part ${index + 1}:\n\n${chunkText}`;
 
-  return generateWithFallback(
-    systemPrompt,
-    userPrompt,
-    CHAT_MODEL_FAST,
-    CHAT_MODEL_STRONG,
-    0.1,
-  );
+  return generate(systemPrompt, userPrompt, CHAT_MODEL_FAST, 0.1);
 }
 
 export async function mapReduceSummary(
@@ -58,11 +48,5 @@ ${combinedSummaries}`;
     return stream(systemPrompt, userPrompt, CHAT_MODEL_FAST, onToken, 0.1);
   }
 
-  return generateWithFallback(
-    systemPrompt,
-    userPrompt,
-    CHAT_MODEL_FAST,
-    CHAT_MODEL_STRONG,
-    0.1,
-  );
+  return generate(systemPrompt, userPrompt, CHAT_MODEL_FAST, 0.1);
 }

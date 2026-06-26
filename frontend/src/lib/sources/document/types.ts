@@ -1,15 +1,3 @@
-export type DocumentPage = {
-  pageNumber: number;
-  text: string;
-};
-
-export type DocumentTextChunk = {
-  text: string;
-  contextText: string;
-  pageNumber: number;
-  chunkIndex: number;
-};
-
 export type ChatHistoryMessage = {
   role: string;
   content: string;

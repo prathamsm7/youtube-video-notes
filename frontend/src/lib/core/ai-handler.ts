@@ -1,10 +1,6 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createOpenAIChatModel } from "./rag/clients/gemini";
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function extractText(content: unknown): string {
   if (typeof content === "string") {
     return content;
@@ -32,11 +28,11 @@ type GenerateOptions = {
   nostream?: boolean;
 };
 
-async function generateOnce(
-  model: string,
+export async function generate(
   systemPrompt: string,
   userPrompt: string,
-  temperature: number,
+  model: string,
+  temperature = 0.2,
   options?: GenerateOptions,
 ): Promise<string> {
   const llm = createOpenAIChatModel(model, temperature, {
@@ -50,106 +46,24 @@ async function generateOnce(
   return text || "No content generated.";
 }
 
-async function streamOnce(
-  model: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number,
-  onToken: (token: string) => void,
-  options?: GenerateOptions,
-): Promise<string> {
-  const llm = createOpenAIChatModel(model, temperature, {
-    nostream: options?.nostream !== false,
-  });
-  let fullText = "";
-
-  const stream = await llm.stream([
-    new SystemMessage(systemPrompt.trim()),
-    new HumanMessage(userPrompt.trim()),
-  ]);
-  for await (const chunk of stream) {
-    const text = extractText(chunk.content);
-    if (text) {
-      fullText += text;
-      onToken(text);
-    }
-  }
-
-  return fullText.trim() || "No content generated.";
-}
-
-export async function generate(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  temperature = 0.2,
-  options?: GenerateOptions,
-): Promise<string> {
-  return generateOnce(model, systemPrompt, userPrompt, temperature, options);
-}
-
-export async function generateWithFallback(
-  systemPrompt: string,
-  userPrompt: string,
-  primaryModel: string,
-  fallbackModel: string,
-  temperature = 0.2,
-  options?: GenerateOptions,
-): Promise<string> {
-  const models = [primaryModel, fallbackModel];
-  let lastError: unknown;
-
-  for (const model of models) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        return await generateOnce(model, systemPrompt, userPrompt, temperature, options);
-      } catch (error) {
-        lastError = error;
-        if (attempt < 2) {
-          await sleep(2 ** attempt * 1000);
-        }
-      }
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("LLM generation failed");
-}
-
-export async function generateStructuredWithFallback<T extends Record<string, unknown>>(
+export async function generateStructured<T extends Record<string, unknown>>(
   systemPrompt: string,
   userPrompt: string,
   schema: Record<string, unknown>,
   schemaName: string,
-  primaryModel: string,
-  fallbackModel: string,
+  model: string,
   temperature = 0,
 ): Promise<T> {
-  const models = [primaryModel, fallbackModel];
-  let lastError: unknown;
-
-  for (const model of models) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const llm = createOpenAIChatModel(model, temperature, { nostream: true });
-        const structured = llm.withStructuredOutput(schema, {
-          name: schemaName,
-          method: "jsonSchema",
-          strict: true,
-        });
-        return (await structured.invoke([
-          new SystemMessage(systemPrompt.trim()),
-          new HumanMessage(userPrompt.trim()),
-        ])) as T;
-      } catch (error) {
-        lastError = error;
-        if (attempt < 2) {
-          await sleep(2 ** attempt * 1000);
-        }
-      }
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("Structured LLM generation failed");
+  const llm = createOpenAIChatModel(model, temperature, { nostream: true });
+  const structured = llm.withStructuredOutput(schema, {
+    name: schemaName,
+    method: "jsonSchema",
+    strict: true,
+  });
+  return (await structured.invoke([
+    new SystemMessage(systemPrompt.trim()),
+    new HumanMessage(userPrompt.trim()),
+  ])) as T;
 }
 
 export async function stream(
@@ -160,5 +74,22 @@ export async function stream(
   temperature = 0.2,
   options?: GenerateOptions,
 ): Promise<string> {
-  return streamOnce(model, systemPrompt, userPrompt, temperature, onToken, options);
+  const llm = createOpenAIChatModel(model, temperature, {
+    nostream: options?.nostream !== false,
+  });
+  let fullText = "";
+
+  const tokenStream = await llm.stream([
+    new SystemMessage(systemPrompt.trim()),
+    new HumanMessage(userPrompt.trim()),
+  ]);
+  for await (const chunk of tokenStream) {
+    const text = extractText(chunk.content);
+    if (text) {
+      fullText += text;
+      onToken(text);
+    }
+  }
+
+  return fullText.trim() || "No content generated.";
 }

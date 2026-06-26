@@ -68,14 +68,3 @@ export function normalizeRouterResult(
   };
 }
 
-export function fallbackRouterResult(
-  query: string,
-  chatHistoryLength: number,
-): QueryRouterLlmResult {
-  return {
-    intent: resolveIntent(query),
-    search_query: query.trim(),
-    language: detectQueryLanguage(query),
-    needs_chat_history: false,
-  };
-}

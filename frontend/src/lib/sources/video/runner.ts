@@ -11,7 +11,6 @@ const queryGraph = buildVideoQueryGraph();
 const ingestGraph = buildVideoIngestGraph();
 
 const emptyQueryState = {
-  filterMessage: null,
   intent: "QA" as const,
   searchQuery: "",
   queryEmbedding: null,

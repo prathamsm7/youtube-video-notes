@@ -3,7 +3,6 @@ export type {
   DocumentIngestStreamEvent,
   DocumentQueryStreamEvent,
 } from "./types";
-export { collectionNameForDocument } from "./collection";
 export { streamDocumentIngest, streamDocumentQuery } from "./runner";
 export {
   createDocument,

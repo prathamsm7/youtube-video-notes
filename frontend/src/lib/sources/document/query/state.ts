@@ -6,7 +6,6 @@ export const DocumentQueryStateAnnotation = Annotation.Root({
   query: Annotation<string>,
   chatHistory: Annotation<ChatHistoryMessage[]>,
   cachedSummary: Annotation<string | null>,
-  filterMessage: Annotation<string | null>,
   intent: Annotation<"SUMMARY" | "QA">,
   searchQuery: Annotation<string>,
   queryEmbedding: Annotation<number[] | null>,

@@ -35,13 +35,6 @@ export async function setVideoFailed(videoId: string, errorMessage: string) {
   });
 }
 
-export async function resetVideoForRetry(videoId: string) {
-  return prisma.video.update({
-    where: { id: videoId },
-    data: { status: VideoStatus.PENDING, errorMessage: null },
-  });
-}
-
 export async function setVideoSummary(videoId: string, summary: string) {
   return prisma.video.update({
     where: { id: videoId },

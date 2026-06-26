@@ -118,16 +118,3 @@ export async function* storeSummarizedChunksStream(
 
   markCollectionReady(documentId);
 }
-
-export async function storeSummarizedChunks(
-  documentId: string,
-  chunks: SummarizedChunk[],
-  onProgress?: (processed: number, total: number) => void,
-): Promise<void> {
-  for await (const { processed, total } of storeSummarizedChunksStream(
-    documentId,
-    chunks,
-  )) {
-    onProgress?.(processed, total);
-  }
-}

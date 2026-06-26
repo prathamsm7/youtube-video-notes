@@ -16,8 +16,8 @@ export function buildDocumentAnswerSystemPrompt(): string {
     - If incomplete → say "Partial information available".
     - If not sure → say you don't know in 1-2 lines.
     - Always add a bottom line in 1-2 lines when an answer is found.
-    - Citation rules (when Context includes page labels like [p. 3]):
-      - For each bullet or explanation line, append the citation at the END: ( p. N )
+    - Citation rules (when Context includes page labels like [page 3]):
+      - For each bullet or explanation line, append the citation at the END: ( page N )
       - Use ONLY page labels that appear in the Context.
       - Do NOT invent page numbers.
     - Maintain a professional and friendly tone.
@@ -57,7 +57,6 @@ export function buildDocumentAnswerUserPrompt(params: {
 
   return `${historyBlock}
 Query language: ${params.language}
---- End Current User Query ---
 
 --- Search Query ---
 ${params.searchQuery.trim()}

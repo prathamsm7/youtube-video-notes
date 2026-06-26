@@ -1,12 +1,11 @@
 import type { AnalyzeQueryResult, ChatHistoryMessage } from "../types";
-import { generateStructuredWithFallback } from "@/lib/core/ai-handler";
+import { generateStructured } from "@/lib/core/ai-handler";
 import {
-  fallbackRouterResult,
   normalizeRouterResult,
   QUERY_ROUTER_RESPONSE_SCHEMA,
   type QueryRouterLlmResult,
 } from "@/lib/core/rag/query-router-schema";
-import { CHAT_MODEL_FAST, CHAT_MODEL_STRONG } from "@/lib/core/rag/constants";
+import { CHAT_MODEL_FAST } from "@/lib/core/rag/constants";
 
 function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
   return chatHistory
@@ -50,20 +49,14 @@ export async function analyzeQuery(
 
   const userPrompt = `${historyBlock}Latest User Query: ${query}`;
 
-  try {
-    const result = await generateStructuredWithFallback<QueryRouterLlmResult>(
-      buildSystemPrompt(),
-      userPrompt,
-      QUERY_ROUTER_RESPONSE_SCHEMA,
-      "document_query_router",
-      CHAT_MODEL_FAST,
-      CHAT_MODEL_STRONG,
-      0,
-    );
+  const result = await generateStructured<QueryRouterLlmResult>(
+    buildSystemPrompt(),
+    userPrompt,
+    QUERY_ROUTER_RESPONSE_SCHEMA,
+    "document_query_router",
+    CHAT_MODEL_FAST,
+    0,
+  );
 
-    return normalizeRouterResult(result, query, chatHistory.length);
-  } catch (error) {
-    console.warn("[document/query] analysis error:", error);
-    return fallbackRouterResult(query, chatHistory.length);
-  }
+  return normalizeRouterResult(result, query, chatHistory.length);
 }

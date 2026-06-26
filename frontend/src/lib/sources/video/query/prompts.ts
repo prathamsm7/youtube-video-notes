@@ -70,7 +70,6 @@ export function buildVideoAnswerUserPrompt(params: {
 
   return `${historyBlock}
 Query language: ${params.language}
---- End Current User Query ---
 
 --- Search Query ---
 ${params.searchQuery.trim()}

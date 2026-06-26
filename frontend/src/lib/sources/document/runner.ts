@@ -9,7 +9,6 @@ import type {
 const queryGraph = buildDocumentQueryGraph();
 
 const emptyQueryState = {
-  filterMessage: null,
   intent: "QA" as const,
   searchQuery: "",
   queryEmbedding: null,
