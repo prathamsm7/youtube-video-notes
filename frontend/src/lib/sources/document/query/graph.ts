@@ -6,6 +6,8 @@ import {
   RETRIEVAL_CHUNK_LIMIT,
 } from "@/lib/core/rag/constants";
 import { embedQuery } from "@/lib/core/rag/embedding";
+import { buildOffTopicResponse, isOffTopicQuery } from "@/lib/core/rag/off-topic";
+import { detectQueryLanguage } from "@/lib/core/rag/query-router-schema";
 import type { QueryIntent } from "../types";
 import { analyzeQuery } from "./router";
 import { retrieveContextWithVector } from "./retrieval";
@@ -34,10 +36,32 @@ async function analyzeQueryNode(
   config: LangGraphRunnableConfig,
 ) {
   emit(config, { type: "status", phase: "analyzing" });
+
+  if (isOffTopicQuery(state.query)) {
+    return {
+      intent: "OFF_TOPIC" as const,
+      searchQuery: "",
+      queryEmbedding: null,
+      language: detectQueryLanguage(state.query),
+      needsChatHistory: false,
+    };
+  }
+
   const [result, queryEmbedding] = await Promise.all([
     analyzeQuery(state.query, state.chatHistory ?? []),
     embedQuery(state.query),
   ]);
+
+  if (result.intent === "OFF_TOPIC") {
+    return {
+      intent: "OFF_TOPIC" as const,
+      searchQuery: "",
+      queryEmbedding: null,
+      language: result.language,
+      needsChatHistory: false,
+    };
+  }
+
   return {
     intent: result.intent,
     searchQuery: result.search_query,
@@ -51,7 +75,26 @@ function routeAfterIntent(state: DocumentQueryState) {
   if (state.intent === "SUMMARY") {
     return "summarize";
   }
+  if (state.intent === "OFF_TOPIC") {
+    return "handle_off_topic";
+  }
   return "prepare_rag";
+}
+
+async function handleOffTopicNode(
+  state: DocumentQueryState,
+  config: LangGraphRunnableConfig,
+) {
+  const message = buildOffTopicResponse(state.query, state.language, "document");
+  emit(config, { type: "token", content: message });
+  emit(config, {
+    type: "meta",
+    payload: { intent: "OFF_TOPIC", summary_generated: false },
+  });
+  return {
+    response: message,
+    intent: "OFF_TOPIC" as const,
+  };
 }
 
 async function summarizeNode(state: DocumentQueryState, config: LangGraphRunnableConfig) {
@@ -186,11 +229,13 @@ export function buildDocumentQueryGraph() {
   const graph = new StateGraph(DocumentQueryStateAnnotation)
     .addNode("analyze_query", analyzeQueryNode)
     .addNode("summarize", summarizeNode)
+    .addNode("handle_off_topic", handleOffTopicNode)
     .addNode("prepare_rag", prepareRagNode)
     .addNode("generate_answer", generateAnswerNode)
     .addEdge(START, "analyze_query")
     .addConditionalEdges("analyze_query", routeAfterIntent)
     .addEdge("summarize", END)
+    .addEdge("handle_off_topic", END)
     .addConditionalEdges("prepare_rag", routeAfterPrepare)
     .addEdge("generate_answer", END);
 

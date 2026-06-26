@@ -19,7 +19,7 @@ export type ChatHistoryMessage = {
   content: string;
 };
 
-export type QueryIntent = "SUMMARY" | "QA";
+export type QueryIntent = "SUMMARY" | "QA" | "OFF_TOPIC";
 
 export type AnalyzeQueryResult = {
   intent: QueryIntent;

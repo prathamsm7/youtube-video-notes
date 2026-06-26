@@ -1,11 +1,13 @@
+import { isOffTopicQuery } from "./off-topic";
+
 export const QUERY_ROUTER_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
     intent: {
       type: "string",
-      enum: ["SUMMARY", "QA"],
+      enum: ["SUMMARY", "QA", "OFF_TOPIC"],
       description:
-        "SUMMARY only when the user explicitly asks for a full-source overview (summarize, recap, main points, etc.). Otherwise QA.",
+        "SUMMARY only when the user explicitly asks for a full-source overview (summarize, recap, main points, etc.). OFF_TOPIC for greetings, thanks, small talk, or vague social messages unrelated to the content. Otherwise QA.",
     },
     search_query: {
       type: "string",
@@ -26,8 +28,10 @@ export const QUERY_ROUTER_RESPONSE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+export type QueryIntent = "SUMMARY" | "QA" | "OFF_TOPIC";
+
 export type QueryRouterLlmResult = {
-  intent: "SUMMARY" | "QA";
+  intent: QueryIntent;
   search_query: string;
   language: string;
   needs_chat_history: boolean;
@@ -37,7 +41,10 @@ const SUMMARY_PATTERN =
   /\b(summarize|summary|summarise|overview|recap|tl;?dr|main points|key points|gist|highlights)\b/i;
 
 /** Conservative gate: full-summary path only for explicit overview requests. */
-export function resolveIntent(query: string): "SUMMARY" | "QA" {
+export function resolveIntent(query: string): QueryIntent {
+  if (isOffTopicQuery(query)) {
+    return "OFF_TOPIC";
+  }
   if (SUMMARY_PATTERN.test(query.trim())) {
     return "SUMMARY";
   }
@@ -57,6 +64,15 @@ export function normalizeRouterResult(
   chatHistoryLength: number,
 ): QueryRouterLlmResult {
   const regexIntent = resolveIntent(query);
+  if (regexIntent === "OFF_TOPIC" || result.intent === "OFF_TOPIC") {
+    return {
+      intent: "OFF_TOPIC",
+      search_query: "",
+      language: result.language.trim() || detectQueryLanguage(query),
+      needs_chat_history: false,
+    };
+  }
+
   const intent =
     regexIntent === "SUMMARY" && result.intent === "SUMMARY" ? "SUMMARY" : "QA";
 

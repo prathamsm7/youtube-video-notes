@@ -1,10 +1,12 @@
 import type { AnalyzeQueryResult, ChatHistoryMessage } from "../types";
 import { generateStructured } from "@/lib/core/ai-handler";
 import {
+  detectQueryLanguage,
   normalizeRouterResult,
   QUERY_ROUTER_RESPONSE_SCHEMA,
   type QueryRouterLlmResult,
 } from "@/lib/core/rag/query-router-schema";
+import { isOffTopicQuery } from "@/lib/core/rag/off-topic";
 import { CHAT_MODEL_FAST } from "@/lib/core/rag/constants";
 
 function formatChatHistory(chatHistory: ChatHistoryMessage[]): string {
@@ -25,8 +27,14 @@ Search query rules:
 
 Intent rules:
 - SUMMARY: ONLY when the user explicitly asks for a full-video overview (summarize, recap, main points, etc.)
+- OFF_TOPIC: Greetings, thanks, small talk, or vague social messages unrelated to the video (e.g. "hi", "how are you", "thanks")
 - QA: ANY specific question about the video — what/how/why/which/step/part/compare/explain a topic
-- When unsure → QA
+- When unsure about content relevance → QA
+
+OFF_TOPIC examples:
+- "how are you" → intent OFF_TOPIC
+- "hello" → intent OFF_TOPIC
+- "thanks" → intent OFF_TOPIC
 
 SUMMARY examples:
 - "summarize this video" → intent SUMMARY
@@ -46,6 +54,15 @@ export async function analyzeQuery(
   query: string,
   chatHistory: ChatHistoryMessage[] = [],
 ): Promise<AnalyzeQueryResult> {
+  if (isOffTopicQuery(query)) {
+    return {
+      intent: "OFF_TOPIC",
+      search_query: "",
+      language: detectQueryLanguage(query),
+      needs_chat_history: false,
+    };
+  }
+
   const historyStr = formatChatHistory(chatHistory);
   const historyBlock = historyStr
     ? `Chat History:\n${historyStr}\n\n`

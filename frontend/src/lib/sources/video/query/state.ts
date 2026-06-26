@@ -6,7 +6,7 @@ export const VideoQueryStateAnnotation = Annotation.Root({
   query: Annotation<string>,
   chatHistory: Annotation<ChatHistoryMessage[]>,
   cachedSummary: Annotation<string | null>,
-  intent: Annotation<"SUMMARY" | "QA">,
+  intent: Annotation<"SUMMARY" | "QA" | "OFF_TOPIC">,
   searchQuery: Annotation<string>,
   queryEmbedding: Annotation<number[] | null>,
   language: Annotation<string>,

@@ -74,7 +74,12 @@ function toQueryStreamEvent(data: Record<string, unknown>): VideoQueryStreamEven
     return {
       kind: "meta",
       payload: {
-        intent: payload.intent === "SUMMARY" ? "SUMMARY" : "QA",
+        intent:
+          payload.intent === "SUMMARY"
+            ? "SUMMARY"
+            : payload.intent === "OFF_TOPIC"
+              ? "OFF_TOPIC"
+              : "QA",
         summary_generated: payload.summary_generated === true,
       },
     };
