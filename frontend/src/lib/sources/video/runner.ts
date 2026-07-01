@@ -17,9 +17,16 @@ const emptyQueryState = {
   language: "English",
   needsChatHistory: false,
   context: null,
+  retrievedDocuments: [] as string[],
   response: "",
   summaryGenerated: false,
   error: null,
+};
+
+export type VideoQueryResult = {
+  answer: string;
+  retrievedDocuments: string[];
+  intent: "SUMMARY" | "QA" | "OFF_TOPIC";
 };
 
 const emptyIngestState = {
@@ -123,6 +130,28 @@ function toIngestStreamEvent(data: Record<string, unknown>): VideoIngestStreamEv
   }
 
   return null;
+}
+
+export async function invokeVideoQuery(
+  videoId: string,
+  query: string,
+): Promise<VideoQueryResult> {
+  const result = await queryGraph.invoke(
+    {
+      videoId,
+      query,
+      chatHistory: [],
+      cachedSummary: null,
+      ...emptyQueryState,
+    },
+    traceConfig("video-query-eval", { videoId }),
+  );
+
+  return {
+    answer: result.response?.trim() ?? "",
+    retrievedDocuments: result.retrievedDocuments ?? [],
+    intent: result.intent,
+  };
 }
 
 export async function* streamVideoQuery(

@@ -1,4 +1,5 @@
-export { streamVideoIngest, streamVideoQuery } from "./runner";
+export { streamVideoIngest, streamVideoQuery, invokeVideoQuery } from "./runner";
+export type { VideoQueryResult } from "./runner";
 export type {
   ChatHistoryMessage,
   VideoIngestStreamEvent,

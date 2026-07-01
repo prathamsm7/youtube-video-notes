@@ -14,6 +14,7 @@ model User {
   createdAt      DateTime        @default(now())
   notionProfiles NotionProfile[]
   chats          Chat[]
+  evalRuns       EvalRun[]
 }
 
 model NotionProfile {
@@ -100,4 +101,36 @@ model Message {
   createdAt DateTime    @default(now())
 
   @@index([chatId, createdAt])
+}
+
+model EvalRun {
+  id             String   @id @default(cuid())
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  youtubeId      String
+  limit          Int
+  experimentName String
+  experimentId   String
+  compareUrl     String
+  summary        Json
+  results        Json
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([youtubeId, createdAt])
+}
+
+model EvalExample {
+  id              String   @id @default(cuid())
+  youtubeId       String?
+  documentId      String?
+  sortOrder       Int
+  question        String   @db.Text
+  referenceAnswer String   @db.Text
+  createdAt       DateTime @default(now())
+
+  @@index([youtubeId, sortOrder])
+  @@index([documentId, sortOrder])
+  @@unique([youtubeId, sortOrder])
+  @@unique([documentId, sortOrder])
 }

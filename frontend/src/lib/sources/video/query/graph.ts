@@ -151,7 +151,7 @@ async function prepareRagNode(
     queryVector = await embedQuery(searchQuery);
   }
 
-  const { context, chunkCount } = await retrieveContextWithVector(
+  const { context, chunkCount, documents } = await retrieveContextWithVector(
     state.videoId,
     searchQuery,
     queryVector,
@@ -180,10 +180,11 @@ async function prepareRagNode(
       searchQuery,
       response: message,
       context: null,
+      retrievedDocuments: [],
     };
   }
 
-  return { searchQuery, context };
+  return { searchQuery, context, retrievedDocuments: documents };
 }
 
 function routeAfterPrepare(state: VideoQueryState) {

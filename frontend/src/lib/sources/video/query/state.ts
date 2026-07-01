@@ -12,6 +12,7 @@ export const VideoQueryStateAnnotation = Annotation.Root({
   language: Annotation<string>,
   needsChatHistory: Annotation<boolean>,
   context: Annotation<string | null>,
+  retrievedDocuments: Annotation<string[]>,
   response: Annotation<string>,
   summaryGenerated: Annotation<boolean>,
   error: Annotation<string | null>,

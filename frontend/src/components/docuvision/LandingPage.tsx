@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   UploadCloud,
@@ -107,6 +108,17 @@ export function LandingPage({
               isDark={isDark}
               onToggle={onThemeToggle}
             />
+            <Link
+              href="/evals"
+              className={cn(
+                "text-sm font-medium transition-colors hidden sm:block",
+                isDark
+                  ? "text-slate-300 hover:text-white"
+                  : "text-slate-600 hover:text-slate-900",
+              )}
+            >
+              Evals
+            </Link>
             <button
               type="button"
               onClick={() =>

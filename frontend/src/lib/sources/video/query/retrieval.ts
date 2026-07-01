@@ -52,13 +52,14 @@ function logRetrievedChunks(
 }
 
 function pointsToContext(points: ScoredPoint[]): RetrieveContextResult {
-  const parts = points
+  const documents = points
     .map((point) => point.payload?.context_text?.trim())
     .filter((text): text is string => Boolean(text));
 
   return {
-    context: parts.length ? parts.join("\n\n") : null,
-    chunkCount: parts.length,
+    context: documents.length ? documents.join("\n\n") : null,
+    chunkCount: documents.length,
+    documents,
   };
 }
 
@@ -107,7 +108,7 @@ export async function retrieveContextWithVector(
   candidateLimit = RETRIEVAL_CANDIDATE_LIMIT,
 ): Promise<RetrieveContextResult> {
   if (!(await collectionExistsForVideo(videoId))) {
-    return { context: null, chunkCount: 0 };
+    return { context: null, chunkCount: 0, documents: [] };
   }
 
   const client = getQdrantClient();
@@ -122,7 +123,7 @@ export async function retrieveContextWithVector(
 
     const candidates = (results.points ?? []) as ScoredPoint[];
     if (!candidates.length) {
-      return { context: null, chunkCount: 0 };
+      return { context: null, chunkCount: 0, documents: [] };
     }
 
     let reranked: Array<{ point: ScoredPoint; vectorScore: number; rerankScore: number }>;
@@ -156,6 +157,6 @@ export async function retrieveContextWithVector(
     return pointsToContext(reranked.map((entry) => entry.point));
   } catch (error) {
     console.error("[video/query/retrieval] Qdrant search error", { collectionName, error });
-    return { context: null, chunkCount: 0 };
+    return { context: null, chunkCount: 0, documents: [] };
   }
 }

@@ -16,6 +16,7 @@ export const CHAT_MODEL_FAST = "gpt-4.1-nano-2025-04-14";
 export const CHAT_MODEL_STRONG = "gpt-5.4-nano-2026-03-17";
 export const CHAT_MODEL_ANSWER_PRIMARY = "gpt-5.4-mini";
 export const CHAT_MODEL_ANSWER_FALLBACK = "gpt-4.1-mini";
+export const CHAT_MODEL_EVALUATOR = "o4-mini-2025-04-16";
 
 export const STREAM_HEADERS = {
   "Cache-Control": "no-cache, no-transform",

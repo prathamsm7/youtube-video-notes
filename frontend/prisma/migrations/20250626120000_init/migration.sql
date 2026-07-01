@@ -1,4 +1,4 @@
-# CreateEnum
+-- CreateEnum
 CREATE TYPE "VideoStatus" AS ENUM ('PENDING', 'PROCESSING', 'READY', 'FAILED');
 
 -- CreateEnum
