@@ -15,6 +15,15 @@ model User {
   notionProfiles NotionProfile[]
   chats          Chat[]
   evalRuns       EvalRun[]
+  evalJobs       EvalJob[]
+}
+
+enum EvalJobStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
 }
 
 model NotionProfile {
@@ -104,9 +113,9 @@ model Message {
 }
 
 model EvalRun {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   userId         Int
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   youtubeId      String
   limit          Int
   experimentName String
@@ -114,23 +123,41 @@ model EvalRun {
   compareUrl     String
   summary        Json
   results        Json
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
+  evalJobs       EvalJob[]
 
   @@index([userId, createdAt])
   @@index([youtubeId, createdAt])
 }
 
-model EvalExample {
-  id              String   @id @default(cuid())
-  youtubeId       String?
-  documentId      String?
-  sortOrder       Int
-  question        String   @db.Text
-  referenceAnswer String   @db.Text
-  createdAt       DateTime @default(now())
+model EvalJob {
+  id             String        @id @default(cuid())
+  userId         Int
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  youtubeId      String
+  limit          Int?
+  status         EvalJobStatus @default(queued)
+  progressDone   Int           @default(0)
+  progressTotal  Int           @default(0)
+  resumeFrom     Int           @default(0)
+  partialResults Json          @default("[]")
+  lastError      String?       @db.Text
+  cancelRequested Boolean      @default(false)
+  evalRunId      String?
+  evalRun        EvalRun?      @relation(fields: [evalRunId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
 
-  @@index([youtubeId, sortOrder])
-  @@index([documentId, sortOrder])
-  @@unique([youtubeId, sortOrder])
-  @@unique([documentId, sortOrder])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model EvalDataset {
+  id         String   @id @default(cuid())
+  youtubeId  String?  @unique
+  documentId String?  @unique
+  qaPairs    Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }

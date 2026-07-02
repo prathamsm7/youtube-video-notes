@@ -15,7 +15,13 @@ import { AppShell } from "@/components/docuvision/AppShell";
 import { ThemeToggle } from "@/components/docuvision/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
-import type { EvalComments, EvalResultRow, EvalScores, EvalSummary } from "@/lib/eval/types";
+import type {
+  EvalComments,
+  EvalJobView,
+  EvalResultRow,
+  EvalScores,
+  EvalSummary,
+} from "@/lib/eval/types";
 import { cn } from "@/lib/utils";
 
 type EvalRunResponse = {
@@ -445,7 +451,9 @@ export default function EvalsPage() {
 
   const [videoInput, setVideoInput] = useState("");
   const [limit, setLimit] = useState(3);
+  const [fullDataset, setFullDataset] = useState(false);
   const [running, setRunning] = useState(false);
+  const [activeJob, setActiveJob] = useState<EvalJobView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalRunResponse | null>(null);
   const [history, setHistory] = useState<EvalRunHistoryItem[]>([]);
@@ -471,6 +479,92 @@ export default function EvalsPage() {
     loadHistory().catch(() => setHistory([]));
   }, [user, loadHistory]);
 
+  const loadActiveJob = useCallback(async () => {
+    const res = await apiFetch("/api/eval/jobs/active");
+    if (!res.ok) return;
+    const data = (await res.json()) as { job: EvalJobView | null };
+    setActiveJob(data.job);
+    return data.job;
+  }, [apiFetch]);
+
+  const applyJobToResult = useCallback((job: EvalJobView) => {
+    if (job.status !== "completed" || job.partialResults.length === 0) return;
+    setResult({
+      id: job.evalRunId ?? job.id,
+      createdAt: job.completedAt ?? job.createdAt,
+      videoId: job.youtubeId,
+      limit: job.progressDone,
+      experimentName: job.experimentName ?? `docuvision-job-${job.id}`,
+      experimentId: job.experimentId ?? job.id,
+      compareUrl: job.compareUrl ?? "https://smith.langchain.com",
+      summary: job.summary,
+      results: job.partialResults,
+    });
+    setSelectedIndex(0);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    loadActiveJob()
+      .then((job) => {
+        if (!job) return;
+        if (job.status === "completed") {
+          applyJobToResult(job);
+          setActiveJob(null);
+        } else if (job.status === "queued" || job.status === "running") {
+          setRunning(true);
+        } else if (job.status === "failed") {
+          setError(job.lastError ?? "Evaluation failed");
+        }
+      })
+      .catch(() => setActiveJob(null));
+  }, [user, loadActiveJob, applyJobToResult]);
+
+  useEffect(() => {
+    if (!activeJob) return;
+    if (
+      activeJob.status !== "queued" &&
+      activeJob.status !== "running" &&
+      activeJob.status !== "failed"
+    ) {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      const res = await apiFetch(`/api/eval/jobs/${activeJob.id}`);
+      if (!res.ok) return;
+      const job = (await res.json()) as EvalJobView;
+
+      if (job.status === "completed") {
+        applyJobToResult(job);
+        setActiveJob(null);
+        setRunning(false);
+        await loadHistory();
+        return;
+      }
+
+      setActiveJob(job);
+
+      if (job.status === "failed" || job.status === "cancelled") {
+        setRunning(false);
+        if (job.status === "failed") {
+          setError(job.lastError ?? "Evaluation failed");
+        }
+        if (job.status === "cancelled") {
+          setActiveJob(null);
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [activeJob, apiFetch, applyJobToResult, loadHistory]);
+
+  const jobBlocksNewRun =
+    activeJob !== null &&
+    (activeJob.status === "queued" ||
+      activeJob.status === "running" ||
+      activeJob.status === "failed");
+
   const runEval = useCallback(async () => {
     setRunning(true);
     setError(null);
@@ -479,28 +573,73 @@ export default function EvalsPage() {
     setActiveMetric(null);
 
     try {
-      const res = await apiFetch("/api/eval/run", {
+      const res = await apiFetch("/api/eval/jobs", {
         method: "POST",
-        body: JSON.stringify({ videoId: videoInput, limit }),
+        body: JSON.stringify({
+          videoId: videoInput,
+          full: fullDataset,
+          limit: fullDataset ? undefined : limit,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.detail || "Evaluation failed");
+        throw new Error(data.detail || "Failed to start evaluation");
       }
 
-      const payload = data as EvalRunResponse;
-      setResult(payload);
-      if (payload.results.length > 0) {
-        setSelectedIndex(0);
-      }
-      await loadHistory();
+      const job = data as EvalJobView;
+      setActiveJob(job);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Evaluation failed");
-    } finally {
+      setError(err instanceof Error ? err.message : "Failed to start evaluation");
       setRunning(false);
     }
-  }, [apiFetch, videoInput, limit, loadHistory]);
+  }, [apiFetch, videoInput, limit, fullDataset]);
+
+  const resumeJob = useCallback(async () => {
+    if (!activeJob) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/eval/jobs/${activeJob.id}/resume`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Resume failed");
+      setActiveJob(data as EvalJobView);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Resume failed");
+      setRunning(false);
+    }
+  }, [apiFetch, activeJob]);
+
+  const cancelJob = useCallback(async () => {
+    if (!activeJob) return;
+    try {
+      const res = await apiFetch(`/api/eval/jobs/${activeJob.id}/cancel`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Cancel failed");
+      const job = data as EvalJobView;
+      setActiveJob(job.status === "cancelled" ? null : job);
+      setRunning(false);
+      if (job.partialResults.length > 0) {
+        setResult({
+          id: job.id,
+          createdAt: job.createdAt,
+          videoId: job.youtubeId,
+          limit: job.progressDone,
+          experimentName: job.experimentName ?? `docuvision-job-${job.id}`,
+          experimentId: job.experimentId ?? job.id,
+          compareUrl: job.compareUrl ?? "https://smith.langchain.com",
+          summary: job.summary,
+          results: job.partialResults,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cancel failed");
+    }
+  }, [apiFetch, activeJob]);
 
   if (authLoading || !user) {
     return (
@@ -581,7 +720,7 @@ export default function EvalsPage() {
                   onChange={(e) => setVideoInput(e.target.value)}
                   placeholder="https://youtube.com/watch?v=..."
                   className={inputClass}
-                  disabled={running}
+                  disabled={running || jobBlocksNewRun}
                 />
               </div>
               <div className="space-y-1.5">
@@ -592,28 +731,95 @@ export default function EvalsPage() {
                   id="limit"
                   type="number"
                   min={1}
-                  max={15}
+                  max={50}
                   value={limit}
                   onChange={(e) => setLimit(Number(e.target.value))}
                   className={inputClass}
-                  disabled={running}
+                  disabled={running || jobBlocksNewRun || fullDataset}
                 />
               </div>
             </div>
 
+            <label className={cn("flex items-center gap-2 text-sm", body)}>
+              <input
+                type="checkbox"
+                checked={fullDataset}
+                onChange={(e) => setFullDataset(e.target.checked)}
+                disabled={running || jobBlocksNewRun}
+                className="rounded border-slate-300"
+              />
+              Run full golden dataset (background, rate-limited)
+            </label>
+
+            {activeJob && (
+              <div
+                className={cn(
+                  "rounded-lg border px-4 py-3 text-sm",
+                  isDark
+                    ? "border-blue-500/30 bg-blue-500/10 text-blue-100"
+                    : "border-blue-200 bg-blue-50 text-blue-900",
+                )}
+              >
+                <p className="font-medium capitalize">
+                  Job {activeJob.status}
+                  {activeJob.progressTotal > 0 &&
+                    ` — ${activeJob.progressDone}/${activeJob.progressTotal}`}
+                </p>
+                {activeJob.status === "failed" && activeJob.lastError && (
+                  <p className="mt-1 text-rose-500 dark:text-rose-300">{activeJob.lastError}</p>
+                )}
+                {activeJob.partialResults.length > 0 && activeJob.status !== "completed" && (
+                  <p className={cn("mt-1 text-xs", isDark ? "text-blue-200/80" : "text-blue-700")}>
+                    {activeJob.partialResults.length} partial result(s) saved — resume will continue
+                    from golden #{activeJob.resumeFrom + 1}.
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {activeJob.status === "failed" && (
+                    <button
+                      type="button"
+                      onClick={resumeJob}
+                      disabled={running}
+                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                    >
+                      Resume
+                    </button>
+                  )}
+                  {(activeJob.status === "queued" ||
+                    activeJob.status === "running" ||
+                    activeJob.status === "failed") && (
+                    <button
+                      type="button"
+                      onClick={cancelJob}
+                      className={cn(
+                        "rounded-md border px-3 py-1.5 text-xs font-medium",
+                        isDark
+                          ? "border-white/20 text-slate-200 hover:bg-white/10"
+                          : "border-slate-300 text-slate-700 hover:bg-slate-100",
+                      )}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={runEval}
-              disabled={running || !videoInput.trim()}
+              disabled={running || jobBlocksNewRun || !videoInput.trim()}
               className={cn(
                 "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors",
                 "bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
-              {running ? (
+              {running || activeJob?.status === "running" || activeJob?.status === "queued" ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Running eval…
+                  {activeJob
+                    ? `Evaluating ${activeJob.progressDone}/${activeJob.progressTotal}…`
+                    : "Starting…"}
                 </>
               ) : (
                 <>

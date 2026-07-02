@@ -9,6 +9,9 @@ import type { EvaluatorT } from "langsmith/evaluation";
 import { createOpenAIChatModel } from "@/lib/core/rag/clients/gemini";
 import { CHAT_MODEL_EVALUATOR } from "@/lib/core/rag/constants";
 import { CONTEXT_RECALL_PROMPT } from "./context-recall-prompt";
+import { applyFeedbackToRow, emptyScores } from "./scores";
+import { evalJudgeGapMs, sleep } from "./job-config";
+import type { EvalComments, EvalScores } from "./types";
 
 type EvaluatorParams = {
   inputs: Record<string, unknown>;
@@ -120,6 +123,42 @@ const EVALUATOR_CONFIGS = [
   },
 ] as const;
 
+export type EvaluatorInput = {
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  referenceOutputs?: Record<string, unknown>;
+};
+
+type JudgeResult = {
+  key: string;
+  score: number | boolean;
+  comment?: string;
+};
+
+type RunnableEvaluator = (
+  params: EvaluatorInput,
+) => Promise<JudgeResult | JudgeResult[]>;
+
 export const openEvaluators: EvaluatorT[] = EVALUATOR_CONFIGS.map(
   ({ key, prompt, buildJudgeInputs }) => createEvaluator(key, prompt, buildJudgeInputs),
 );
+
+/** Run all LLM judges for one golden example (no LangSmith run wrapper). */
+export async function runEvaluatorsForExample(
+  params: EvaluatorInput,
+): Promise<{ scores: EvalScores; comments: EvalComments }> {
+  const scores = emptyScores();
+  const comments: EvalComments = {};
+  const judgeGap = evalJudgeGapMs();
+
+  for (const evaluator of openEvaluators) {
+    const feedback = await (evaluator as RunnableEvaluator)(params);
+    const items = Array.isArray(feedback) ? feedback : [feedback];
+    for (const item of items) {
+      applyFeedbackToRow(scores, comments, item);
+    }
+    if (judgeGap > 0) await sleep(judgeGap);
+  }
+
+  return { scores, comments };
+}

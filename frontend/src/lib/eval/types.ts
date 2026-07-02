@@ -3,6 +3,15 @@ export type EvalExample = {
   referenceAnswer: string;
 };
 
+export type EvalDatasetSource = {
+  youtubeId?: string | null;
+  documentId?: string | null;
+};
+
+export type EvalDatasetRecord = EvalDatasetSource & {
+  qaPairs: EvalExample[];
+};
+
 export type EvalPrediction = {
   question: string;
   answer: string;
@@ -45,3 +54,31 @@ export type EvalSummary = {
 export function isPassingEvalScore(score: number): boolean {
   return score >= 0.5;
 }
+
+export type EvalJobStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type EvalJobView = {
+  id: string;
+  youtubeId: string;
+  limit: number | null;
+  status: EvalJobStatus;
+  progressDone: number;
+  progressTotal: number;
+  resumeFrom: number;
+  partialResults: EvalResultRow[];
+  summary: EvalSummary | null;
+  lastError: string | null;
+  cancelRequested: boolean;
+  evalRunId: string | null;
+  experimentName: string | null;
+  experimentId: string | null;
+  compareUrl: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};

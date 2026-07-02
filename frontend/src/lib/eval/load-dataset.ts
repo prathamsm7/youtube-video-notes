@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import type { EvalExample } from "./types";
+import type { EvalDatasetRecord, EvalExample } from "./types";
 
 type LoadEvalDatasetParams = {
   limit?: number;
@@ -24,14 +24,54 @@ export async function loadEvalDataset({
       : Prisma.sql`"documentId" = ${documentId!}`;
 
   const rows = await prisma.$queryRaw<
-    Array<{ question: string; referenceAnswer: string }>
+    Array<{
+      youtubeId: string | null;
+      documentId: string | null;
+      qaPairs: Prisma.JsonValue;
+    }>
   >`
-    SELECT question, "referenceAnswer"
-    FROM "EvalExample"
+    SELECT "youtubeId", "documentId", "qaPairs"
+    FROM "EvalDataset"
     WHERE ${sourceFilter}
-    ORDER BY "sortOrder" ASC
-    ${typeof limit === "number" ? Prisma.sql`LIMIT ${limit}` : Prisma.empty}
+    LIMIT 1
   `;
 
-  return rows;
+  const record = rows[0];
+  if (!record) return [];
+
+  return parseEvalDatasetRecord(record).slice(
+    0,
+    typeof limit === "number" ? limit : undefined,
+  );
+}
+
+function parseEvalDatasetRecord(row: {
+  youtubeId: string | null;
+  documentId: string | null;
+  qaPairs: Prisma.JsonValue;
+}): EvalExample[] {
+  const record: EvalDatasetRecord = {
+    youtubeId: row.youtubeId,
+    documentId: row.documentId,
+    qaPairs: parseQaPairs(row.qaPairs),
+  };
+
+  return record.qaPairs;
+}
+
+function parseQaPairs(value: Prisma.JsonValue): EvalExample[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+
+    const question =
+      "question" in item && typeof item.question === "string" ? item.question : null;
+    const referenceAnswer =
+      "referenceAnswer" in item && typeof item.referenceAnswer === "string"
+        ? item.referenceAnswer
+        : null;
+
+    return question && referenceAnswer ? [{ question, referenceAnswer }] : [];
+  });
 }

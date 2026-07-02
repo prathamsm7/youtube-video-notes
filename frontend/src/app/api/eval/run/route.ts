@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { saveEvalRun } from "@/lib/eval/db";
+import { findActiveEvalJob } from "@/lib/eval/job-db";
 import { resolveYoutubeId } from "@/lib/eval/resolve-video-id";
 import { runVideoEval } from "@/lib/eval/run-eval";
 
@@ -12,6 +13,18 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser(req);
   if (!user) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
+  const active = await findActiveEvalJob();
+  if (active) {
+    return NextResponse.json(
+      {
+        detail:
+          "An evaluation job is active. Use POST /api/eval/jobs for background runs.",
+        activeJobId: active.id,
+      },
+      { status: 409 },
+    );
   }
 
   const body = await req.json().catch(() => ({}));
