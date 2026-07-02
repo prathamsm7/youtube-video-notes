@@ -234,7 +234,7 @@ export default function HomePage() {
 
   if (authLoading || !user) {
     return (
-      <div className="min-h-full flex-1 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-violet-500" />
       </div>
     );

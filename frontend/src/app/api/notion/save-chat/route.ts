@@ -3,6 +3,7 @@ import { Client } from "@notionhq/client";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { GoogleGenAI } from "@google/genai";
+import { isNotionFeatureEnabled } from "@/lib/features";
 
 const SYSTEM_INSTRUCTION = `You are a Markdown-to-Notion API block converter. Convert the given text into a valid JSON array of Notion API block objects.
 
@@ -162,6 +163,13 @@ async function convertToNotionBlocks(text: string) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!isNotionFeatureEnabled()) {
+    return NextResponse.json(
+      { detail: "Notion integration is temporarily disabled." },
+      { status: 404 },
+    );
+  }
+
   try {
     const user = await getCurrentUser(req);
     if (!user) {

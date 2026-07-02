@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { isNotionFeatureEnabled } from "@/lib/features";
 
 /**
  * POST /api/notion/auth
@@ -9,6 +10,13 @@ import { getCurrentUser } from "@/lib/auth";
  * on the authenticated user's NotionProfile.
  */
 export async function POST(req: NextRequest) {
+  if (!isNotionFeatureEnabled()) {
+    return NextResponse.json(
+      { success: false, error: "Notion integration is temporarily disabled." },
+      { status: 404 },
+    );
+  }
+
   try {
     const body = await req.json();
     const { code } = body as { code?: string };

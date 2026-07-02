@@ -13,6 +13,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { isNotionFeatureEnabled } from "@/lib/features";
 
 // --- Notion SVG Icon ---
 function NotionIcon({ className }: { className?: string }) {
@@ -55,6 +56,16 @@ const features = [
 function NotionConnectPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!isNotionFeatureEnabled()) {
+      router.replace("/");
+    }
+  }, [router]);
+
+  if (!isNotionFeatureEnabled()) {
+    return null;
+  }
 
   const code = searchParams.get("code");
   const error = searchParams.get("error");

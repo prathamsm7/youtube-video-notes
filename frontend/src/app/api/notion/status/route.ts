@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { isNotionFeatureEnabled } from "@/lib/features";
 
 export async function GET(req: NextRequest) {
+  if (!isNotionFeatureEnabled()) {
+    return NextResponse.json({ connected: false, disabled: true }, { status: 404 });
+  }
+
   try {
     const user = await getCurrentUser(req);
     if (!user) {

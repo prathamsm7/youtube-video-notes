@@ -9,6 +9,7 @@ import type { ChatMessage } from "@/types/ui";
 import { parseSseStream } from "./stream-chat-response";
 import type { ApiMessage, ChatData, ChatMetaResponse } from "./types";
 import { chatFromListItem, getStreamStatusLabel } from "./utils";
+import { isNotionFeatureEnabled } from "@/lib/features";
 
 export function useChatPage() {
   const { user, apiFetch, logout, isLoading: authLoading } = useAuth();
@@ -113,7 +114,7 @@ export function useChatPage() {
   }, [user, chatId, chatsLoading, loadMessages]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isNotionFeatureEnabled()) return;
     apiFetch("/api/notion/status")
       .then((res) => res.json())
       .then((data) => setNotionConnected(data.connected))
@@ -121,6 +122,7 @@ export function useChatPage() {
   }, [user, apiFetch]);
 
   const handleSaveToNotion = async (msg: ChatMessage) => {
+    if (!isNotionFeatureEnabled()) return;
     if (!chat) return;
     setSavingToNotion(msg.id);
     try {

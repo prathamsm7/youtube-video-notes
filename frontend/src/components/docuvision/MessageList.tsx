@@ -7,6 +7,7 @@ import { ChatMessage } from "@/types/ui";
 import { cn } from "@/lib/utils";
 import { useVideoPlayer } from "@/context/VideoPlayerContext";
 import { ContentWithCitations } from "./ContentWithCitations";
+import { isNotionFeatureEnabled } from "@/lib/features";
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -138,7 +139,11 @@ function MessageBubble({
             <ContentWithCitations content={message.content} onSeek={seekTo} />
           )}
 
-          {notionConnected && !isUser && message.content && onSaveToNotion && (
+          {isNotionFeatureEnabled() &&
+            notionConnected &&
+            !isUser &&
+            message.content &&
+            onSaveToNotion && (
             <button
               type="button"
               onClick={() => onSaveToNotion(message)}

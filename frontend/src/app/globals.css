@@ -15,7 +15,8 @@
 
 @layer base {
   html {
-    @apply min-h-full w-full m-0 p-0 overflow-x-hidden;
+    @apply w-full m-0 p-0 overflow-x-clip scroll-smooth;
+    scroll-padding-top: 5rem;
   }
 
   html.dark {
@@ -28,9 +29,15 @@
   }
 
   body {
-    @apply min-h-full w-full m-0 p-0 flex flex-col overflow-x-hidden;
+    @apply w-full m-0 p-0;
     background: inherit;
     color: inherit;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
   }
 }
 
