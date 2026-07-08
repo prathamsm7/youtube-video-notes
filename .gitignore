@@ -1,6 +1,11 @@
 .DS_Store
 .cursor/
 
+# Accidental root-level npm install (deps live in frontend/)
+/node_modules/
+/package.json
+/package-lock.json
+
 # Frontend app
 frontend/node_modules/
 frontend/.next/
