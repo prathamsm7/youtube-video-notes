@@ -44,7 +44,7 @@ function buildSummaryPrompt(content: ChunkContentData): string {
   const { text, tables, images } = content;
   const textSection = text.trim() || "(No surrounding text in this chunk)";
 
-  let prompt = `You are creating a searchable description for document content retrieval.
+  let prompt = `You are summarizing document chunks for retrieval.
 
 CONTENT TO ANALYZE:
 TEXT CONTENT:
@@ -52,34 +52,41 @@ ${textSection}
 `;
 
   if (tables.length > 0) {
-    prompt += "\nTABLES (HTML):\n";
+    prompt += "\nTABLES:\n";
     for (let i = 0; i < tables.length; i += 1) {
-      prompt += `Table ${i + 1}:\n${tables[i]}\n\n`;
+      const table = tables[i];
+      if (table.caption) {
+        prompt += `Table caption (preserve this label exactly): ${table.caption}\n`;
+      }
+      prompt += `Table ${i + 1} HTML:\n${table.html}\n\n`;
     }
     prompt +=
-      "\nFor each table: extract all headers, rows, numeric values, units, and relationships. Summarize what the table shows.\n";
+      "\nFor each table: extract the exact label, headers, row names, numeric values, units, and the main comparison or relationship shown. Keep the summary literal and grounded in the table contents.\n";
   }
 
   if (images.length > 0) {
     prompt += `\nIMAGES: ${images.length} image(s) are attached after this text. Analyze every attached image in detail.\n`;
+    for (let i = 0; i < images.length; i += 1) {
+      const image = images[i];
+      if (image.caption) {
+        prompt += `Image ${i + 1} caption (preserve this label exactly): ${image.caption}\n`;
+      }
+    }
     prompt +=
-      "For each image: describe charts, diagrams, axes, labels, legends, trends, entities, text visible in the image, and any numeric data shown.\n";
+      "For each image: describe the exact figure label, chart or diagram structure, axes, labels, legends, visible text, and numeric data. Keep the summary literal and grounded in the visible content.\n";
   }
 
   prompt += `
 YOUR TASK:
-Generate a comprehensive, searchable description that covers:
-
-1. Key facts, numbers, and data points from text and tables
-2. Main topics and concepts discussed
-3. Questions this content could answer
-4. Visual content analysis (charts, diagrams, patterns in images) — required when images are attached
-5. Alternative search terms users might use
-
-Make it detailed and searchable - prioritize findability over brevity.
+Write one concise but detailed retrieval summary for this chunk.
+Preserve exact figure and table labels such as Figure 2 or Table 1.
+Do not add alternative search terms.
+Do not add questions this content could answer.
+Do not invent information beyond the text, tables, or images provided.
+Prioritize exact labels, headers, row names, visible text, numbers, units, and relationships.
 Do not say you cannot see images; use the attached image content directly.
 
-SEARCHABLE DESCRIPTION:`;
+SUMMARY:`;
 
   return prompt;
 }
@@ -95,7 +102,9 @@ function buildMultimodalMessageContent(
     const image = content.images[i];
     messageContent.push({
       type: "text",
-      text: `Attached image ${i + 1} of ${content.images.length}:`,
+      text: image.caption
+        ? `Attached image ${i + 1} of ${content.images.length} — caption: ${image.caption}`
+        : `Attached image ${i + 1} of ${content.images.length}:`,
     });
     messageContent.push({
       type: "image",
@@ -139,8 +148,9 @@ export async function createAiEnhancedSummary(
 
     const response = await llm.invoke([
       new SystemMessage(
-        "You are an expert at summarizing document chunks for semantic search. " +
-          "When tables or images are provided, you must extract and describe their content in detail.",
+        "You are an expert at summarizing document chunks for semantic retrieval. " +
+          "Keep summaries literal, compact, and grounded in the provided text, tables, and images. " +
+          "Always preserve exact figure and table labels from captions.",
       ),
       new HumanMessage({ content: messageContent }),
     ]);

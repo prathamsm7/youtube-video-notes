@@ -8,6 +8,12 @@ import type {
 
 const queryGraph = buildDocumentQueryGraph();
 
+export type DocumentQueryResult = {
+  answer: string;
+  retrievedDocuments: string[];
+  intent: "SUMMARY" | "QA" | "OFF_TOPIC";
+};
+
 const emptyQueryState = {
   intent: "QA" as const,
   searchQuery: "",
@@ -15,6 +21,7 @@ const emptyQueryState = {
   language: "English",
   needsChatHistory: false,
   context: null,
+  retrievedDocuments: [] as string[],
   response: "",
   summaryGenerated: false,
   error: null,
@@ -74,6 +81,28 @@ function toQueryStreamEvent(data: Record<string, unknown>): DocumentQueryStreamE
   }
 
   return null;
+}
+
+export async function invokeDocumentQuery(
+  documentId: string,
+  query: string,
+): Promise<DocumentQueryResult> {
+  const result = await queryGraph.invoke(
+    {
+      documentId,
+      query,
+      chatHistory: [],
+      cachedSummary: null,
+      ...emptyQueryState,
+    },
+    traceConfig("document-query-eval", { documentId }),
+  );
+
+  return {
+    answer: result.response?.trim() ?? "",
+    retrievedDocuments: result.retrievedDocuments ?? [],
+    intent: result.intent,
+  };
 }
 
 export async function* streamDocumentQuery(

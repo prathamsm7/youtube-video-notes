@@ -13,6 +13,7 @@ import {
 } from "./job-db";
 import { loadEvalDataset } from "./load-dataset";
 import { evalCooldownMs, sleep } from "./job-config";
+import { decodeEvalJobSourceId, evalSourceLabel, loadDatasetParams } from "./eval-source";
 import { recordQueuedEvalExperiment, summarizeEvalResults } from "./run-eval";
 import type { EvalResultRow } from "./types";
 
@@ -21,13 +22,14 @@ export type EvalJobCooldown = {
 };
 
 async function loadJobContext(job: EvalJob) {
+  const source = decodeEvalJobSourceId(job.youtubeId);
   const examples = await loadEvalDataset({
-    youtubeId: job.youtubeId,
+    ...loadDatasetParams(source),
     limit: job.limit ?? undefined,
   });
 
   if (examples.length === 0) {
-    throw new Error(`No golden dataset found for video ${job.youtubeId}.`);
+    throw new Error(`No golden dataset found for ${evalSourceLabel(source)}.`);
   }
 
   const partialResults = Array.isArray(job.partialResults)
@@ -45,6 +47,7 @@ async function runGoldenLoop(
   cooldown?: EvalJobCooldown,
 ): Promise<EvalResultRow[]> {
   const { examples, startIndex } = await loadJobContext(job);
+  const source = decodeEvalJobSourceId(job.youtubeId);
   const cooldownMs = evalCooldownMs();
   const pause = cooldown?.sleep ?? sleep;
 
@@ -63,7 +66,7 @@ async function runGoldenLoop(
       : [];
 
     if (partialResults.length <= i) {
-      const row = await evaluateOneGolden(job.youtubeId, examples[i]);
+      const row = await evaluateOneGolden(source, examples[i]);
       partialResults.push(row);
 
       await updateEvalJobCheckpoint(job.id, {
@@ -85,9 +88,10 @@ async function runGoldenLoop(
 }
 
 async function finalizeJob(job: EvalJob, partialResults: EvalResultRow[]) {
+  const source = decodeEvalJobSourceId(job.youtubeId);
   const summary = summarizeEvalResults(partialResults);
   const experiment = await recordQueuedEvalExperiment({
-    videoId: job.youtubeId,
+    source,
     jobId: job.id,
     results: partialResults,
   });

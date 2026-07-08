@@ -15,6 +15,7 @@ export type AnalyzeQueryResult = {
 export type RetrieveContextResult = {
   context: string | null;
   chunkCount: number;
+  documents: string[];
 };
 
 export type DocumentQueryStreamEvent =

@@ -27,14 +27,43 @@ function documentTextForRerank(point: ScoredPoint): string {
   return point.payload?.text?.trim() || point.payload?.context_text?.trim() || "";
 }
 
+function logRetrievedChunks(
+  documentId: string,
+  searchQuery: string,
+  vectorCandidates: ScoredPoint[],
+  reranked: Array<{ point: ScoredPoint; vectorScore: number; rerankScore: number }>,
+  usedReranker: boolean,
+) {
+  console.log("[document/query/retrieval] retrieved chunks", {
+    documentId,
+    searchQuery,
+    usedReranker,
+    chunkCount: reranked.length,
+    vectorCandidates: vectorCandidates.map((point) => ({
+      id: point.id,
+      vectorScore: point.score ?? null,
+      chunk_index: point.payload?.chunk_index ?? null,
+      page_number: point.payload?.page_number ?? null,
+    })),
+    rerankedChunks: reranked.map((entry) => ({
+      id: entry.point.id,
+      vectorScore: entry.vectorScore,
+      rerankScore: entry.rerankScore,
+      chunk_index: entry.point.payload?.chunk_index ?? null,
+      page_number: entry.point.payload?.page_number ?? null,
+    })),
+  });
+}
+
 function pointsToContext(points: ScoredPoint[]): RetrieveContextResult {
-  const parts = points
+  const documents = points
     .map((point) => point.payload?.context_text?.trim() || point.payload?.text?.trim())
     .filter((text): text is string => Boolean(text));
 
   return {
-    context: parts.length ? parts.join("\n\n") : null,
-    chunkCount: parts.length,
+    context: documents.length ? documents.join("\n\n") : null,
+    chunkCount: documents.length,
+    documents,
   };
 }
 
@@ -83,7 +112,7 @@ export async function retrieveContextWithVector(
   candidateLimit = RETRIEVAL_CANDIDATE_LIMIT,
 ): Promise<RetrieveContextResult> {
   if (!(await collectionExistsForDocument(documentId))) {
-    return { context: null, chunkCount: 0 };
+    return { context: null, chunkCount: 0, documents: [] };
   }
 
   const client = getQdrantClient();
@@ -98,7 +127,7 @@ export async function retrieveContextWithVector(
 
     const candidates = (results.points ?? []) as ScoredPoint[];
     if (!candidates.length) {
-      return { context: null, chunkCount: 0 };
+      return { context: null, chunkCount: 0, documents: [] };
     }
 
     let reranked: Array<{ point: ScoredPoint; vectorScore: number; rerankScore: number }>;
@@ -127,16 +156,11 @@ export async function retrieveContextWithVector(
       }));
     }
 
-    console.log("[document/query/retrieval] retrieved chunks", {
-      documentId,
-      searchQuery,
-      usedReranker,
-      chunkCount: reranked.length,
-    });
+    logRetrievedChunks(documentId, searchQuery, candidates, reranked, usedReranker);
 
     return pointsToContext(reranked.map((entry) => entry.point));
   } catch (error) {
     console.error("[document/query/retrieval] Qdrant search error", { collectionName, error });
-    return { context: null, chunkCount: 0 };
+    return { context: null, chunkCount: 0, documents: [] };
   }
 }

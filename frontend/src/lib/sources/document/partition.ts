@@ -1,6 +1,9 @@
 import { UnstructuredClient } from "unstructured-client";
 import { Strategy } from "unstructured-client/sdk/models/shared";
 import { buildDocumentChunks, type DocumentChunk } from "./content";
+import { EXCLUDED_PARTITION_ELEMENTS } from "./excluded-elements";
+
+export { EXCLUDED_PARTITION_ELEMENTS };
 
 const client = new UnstructuredClient({
   ...(process.env.UNSTRUCTURED_API_URL
@@ -33,6 +36,9 @@ export async function partitionPdf(
       newAfterNChars: 1000,
       combineUnderNChars: 500,
       includeOrigElements: true,
+      
+      // Legacy unstructured-client v0.31 does not forward exclude_elements to the API.
+      // Header/Footer/PageNumber are stripped locally via EXCLUDED_PARTITION_ELEMENTS.
     },
   });
 

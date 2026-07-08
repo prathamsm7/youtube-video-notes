@@ -1,4 +1,6 @@
+import { invokeDocumentQuery } from "@/lib/sources/document/runner";
 import { invokeVideoQuery } from "@/lib/sources/video/runner";
+import type { EvalSource } from "./eval-source";
 import { runEvaluatorsForExample } from "./evaluators";
 import { sleep } from "./job-config";
 import type { EvalExample, EvalResultRow } from "./types";
@@ -22,15 +24,22 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 5): Promise<T> {
   throw lastError;
 }
 
+async function invokeEvalQuery(source: EvalSource, question: string) {
+  if (source.kind === "video") {
+    return invokeVideoQuery(source.id, question);
+  }
+  return invokeDocumentQuery(source.id, question);
+}
+
 /** Run RAG + all judges for a single golden example. */
 export async function evaluateOneGolden(
-  videoId: string,
+  source: EvalSource,
   example: EvalExample,
 ): Promise<EvalResultRow> {
   const inputs = { question: example.question };
   const referenceOutputs = { answer: example.referenceAnswer };
 
-  const rag = await withRetry(() => invokeVideoQuery(videoId, example.question));
+  const rag = await withRetry(() => invokeEvalQuery(source, example.question));
   const outputs = {
     answer: rag.answer,
     retrievedDocuments: rag.retrievedDocuments,

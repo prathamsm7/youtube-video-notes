@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { Client } from "langsmith";
 import { evaluate } from "langsmith/evaluation";
+import { invokeDocumentQuery } from "@/lib/sources/document/runner";
 import { invokeVideoQuery } from "@/lib/sources/video/runner";
+import {
+  datasetLangSmithName,
+  experimentPrefix,
+  evalSourceLabel,
+  loadDatasetParams,
+  type EvalSource,
+} from "./eval-source";
 import { openEvaluators } from "./evaluators";
 import { loadEvalDataset } from "./load-dataset";
 import {
@@ -68,20 +76,22 @@ export async function buildCompareUrl(client: Client, experimentName: string) {
 }
 
 export async function recordQueuedEvalExperiment(params: {
-  videoId: string;
+  source: EvalSource;
   jobId: string;
   results: EvalResultRow[];
 }) {
   const client = new Client();
   // Keep the full golden set in LangSmith so partial runs (e.g. 3/15) compare correctly.
-  const allExamples = await loadEvalDataset({ youtubeId: params.videoId });
+  const allExamples = await loadEvalDataset(loadDatasetParams(params.source));
   const datasetName = await syncDataset(
     client,
-    `docuvision-eval-video-${params.videoId}`,
-    allExamples.length > 0 ? allExamples : params.results.map((row) => ({
-      question: row.question,
-      referenceAnswer: row.referenceAnswer,
-    })),
+    datasetLangSmithName(params.source),
+    allExamples.length > 0
+      ? allExamples
+      : params.results.map((row) => ({
+          question: row.question,
+          referenceAnswer: row.referenceAnswer,
+        })),
   );
   const dataset = await client.readDataset({ datasetName });
 
@@ -92,11 +102,11 @@ export async function recordQueuedEvalExperiment(params: {
     if (question) exampleByQuestion.set(question, example.id);
   }
 
-  const experimentName = `docuvision-video-${params.videoId}-job-${params.jobId}`;
+  const experimentName = `${experimentPrefix(params.source)}-job-${params.jobId}`;
   await getOrCreateQueuedEvalProject(client, {
     experimentName,
     datasetId: dataset.id,
-    videoId: params.videoId,
+    source: params.source,
     jobId: params.jobId,
   });
 
@@ -119,7 +129,9 @@ export async function recordQueuedEvalExperiment(params: {
       end_time: now.toISOString(),
       extra: {
         metadata: {
-          videoId: params.videoId,
+          ...(params.source.kind === "video"
+            ? { videoId: params.source.id }
+            : { documentId: params.source.id }),
           jobId: params.jobId,
           rowIndex: index,
         },
@@ -143,7 +155,7 @@ async function getOrCreateQueuedEvalProject(
   params: {
     experimentName: string;
     datasetId: string;
-    videoId: string;
+    source: EvalSource;
     jobId: string;
   },
 ) {
@@ -152,7 +164,9 @@ async function getOrCreateQueuedEvalProject(
       projectName: params.experimentName,
       description: "Queued DocuVision eval job",
       metadata: {
-        videoId: params.videoId,
+        ...(params.source.kind === "video"
+          ? { videoId: params.source.id }
+          : { documentId: params.source.id }),
         jobId: params.jobId,
         source: "eval-job",
       },
@@ -244,23 +258,30 @@ export function summarizeEvalResults(results: EvalResultRow[]): EvalSummary | nu
   };
 }
 
-export async function runVideoEval(videoId: string, limit = 3) {
+async function invokeEvalQuery(source: EvalSource, question: string) {
+  if (source.kind === "video") {
+    return invokeVideoQuery(source.id, question);
+  }
+  return invokeDocumentQuery(source.id, question);
+}
+
+async function runEvalForSource(source: EvalSource, limit = 3) {
   const client = new Client();
-  const examples = await loadEvalDataset({ limit, youtubeId: videoId });
+  const examples = await loadEvalDataset({ limit, ...loadDatasetParams(source) });
 
   if (examples.length === 0) {
-    throw new Error(`No golden dataset found for video ${videoId}.`);
+    throw new Error(`No golden dataset found for ${evalSourceLabel(source)}.`);
   }
 
   const datasetName = await syncDataset(
     client,
-    `docuvision-eval-video-${videoId}`,
+    datasetLangSmithName(source),
     examples,
   );
 
   const experiment = await evaluate(
     async (inputs: { question: string }) => {
-      const result = await invokeVideoQuery(videoId, inputs.question);
+      const result = await invokeEvalQuery(source, inputs.question);
       return {
         answer: result.answer,
         retrievedDocuments: result.retrievedDocuments,
@@ -270,9 +291,12 @@ export async function runVideoEval(videoId: string, limit = 3) {
       client,
       data: datasetName,
       evaluators: openEvaluators,
-      experimentPrefix: `docuvision-video-${videoId}`,
+      experimentPrefix: experimentPrefix(source),
       maxConcurrency: 2,
-      metadata: { videoId },
+      metadata:
+        source.kind === "video"
+          ? { videoId: source.id }
+          : { documentId: source.id },
     },
   );
 
@@ -283,12 +307,38 @@ export async function runVideoEval(videoId: string, limit = 3) {
   );
 
   return {
-    videoId,
+    source,
     limit: results.length,
     experimentName: experiment.experimentName,
     experimentId,
     compareUrl,
     summary: summarizeEvalResults(results),
     results,
+  };
+}
+
+export async function runVideoEval(videoId: string, limit = 3) {
+  const run = await runEvalForSource({ kind: "video", id: videoId }, limit);
+  return {
+    videoId,
+    limit: run.limit,
+    experimentName: run.experimentName,
+    experimentId: run.experimentId,
+    compareUrl: run.compareUrl,
+    summary: run.summary,
+    results: run.results,
+  };
+}
+
+export async function runDocumentEval(documentId: string, limit = 3) {
+  const run = await runEvalForSource({ kind: "document", id: documentId }, limit);
+  return {
+    documentId,
+    limit: run.limit,
+    experimentName: run.experimentName,
+    experimentId: run.experimentId,
+    compareUrl: run.compareUrl,
+    summary: run.summary,
+    results: run.results,
   };
 }

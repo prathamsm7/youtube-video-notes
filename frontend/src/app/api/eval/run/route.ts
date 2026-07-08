@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { saveEvalRun } from "@/lib/eval/db";
 import { findActiveEvalJob } from "@/lib/eval/job-db";
-import { resolveYoutubeId } from "@/lib/eval/resolve-video-id";
-import { runVideoEval } from "@/lib/eval/run-eval";
+import {
+  encodeEvalJobSourceId,
+  resolveEvalSource,
+} from "@/lib/eval/eval-source";
+import { runDocumentEval, runVideoEval } from "@/lib/eval/run-eval";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,26 +31,34 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const videoInput = typeof body.videoId === "string" ? body.videoId : "";
+  const source = resolveEvalSource({
+    videoId: typeof body.videoId === "string" ? body.videoId : undefined,
+    documentId: typeof body.documentId === "string" ? body.documentId : undefined,
+  });
   const limitRaw = Number(body.limit ?? 3);
   const limit = Number.isFinite(limitRaw)
     ? Math.min(15, Math.max(1, Math.floor(limitRaw)))
     : 3;
 
-  const videoId = resolveYoutubeId(videoInput);
-  if (!videoId) {
+  if (!source) {
     return NextResponse.json(
-      { detail: "Provide a valid YouTube URL or 11-character video ID." },
+      {
+        detail:
+          "Provide a valid YouTube URL/ID or document ID (not both).",
+      },
       { status: 400 },
     );
   }
 
   try {
-    const run = await runVideoEval(videoId, limit);
+    const run =
+      source.kind === "video"
+        ? await runVideoEval(source.id, limit)
+        : await runDocumentEval(source.id, limit);
 
     const saved = await saveEvalRun({
       userId: user.id,
-      videoId: run.videoId,
+      videoId: encodeEvalJobSourceId(source),
       limit: run.limit,
       experimentName: run.experimentName,
       experimentId: run.experimentId,
@@ -59,6 +70,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       id: saved.id,
       createdAt: saved.createdAt.toISOString(),
+      sourceKind: source.kind,
+      sourceId: source.id,
+      videoId: source.kind === "video" ? source.id : undefined,
+      documentId: source.kind === "document" ? source.id : undefined,
       ...run,
     });
   } catch (error) {

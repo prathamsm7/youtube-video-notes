@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { listEvalRuns } from "@/lib/eval/db";
-import { resolveYoutubeId } from "@/lib/eval/resolve-video-id";
+import {
+  encodeEvalJobSourceId,
+  resolveEvalSourceFromInput,
+} from "@/lib/eval/eval-source";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,10 +15,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 
-  const videoInput = req.nextUrl.searchParams.get("videoId") ?? "";
-  const youtubeId = videoInput ? resolveYoutubeId(videoInput) : null;
+  const sourceInput =
+    req.nextUrl.searchParams.get("videoId") ??
+    req.nextUrl.searchParams.get("documentId") ??
+    req.nextUrl.searchParams.get("sourceId") ??
+    "";
+  const source = sourceInput ? resolveEvalSourceFromInput(sourceInput) : null;
 
-  const runs = await listEvalRuns(user.id, youtubeId ?? undefined);
+  const runs = await listEvalRuns(
+    user.id,
+    source ? encodeEvalJobSourceId(source) : undefined,
+  );
 
   return NextResponse.json({
     runs: runs.map((run) => ({

@@ -6,6 +6,7 @@ import {
 import { getQdrantClient } from "@/lib/core/rag/clients/qdrant";
 import { generateEmbeddings } from "@/lib/core/rag/embedding";
 import { collectionNameForDocument, markCollectionReady } from "../collection";
+import { collectFigureTableCaptions, type ChunkContentData } from "../content";
 import type { SummarizedChunk } from "./summarize";
 
 async function ensureCollection(
@@ -53,12 +54,22 @@ async function ensureCollection(
   });
 }
 
-function buildContextText(pageNumber: number | null, chunkIndex: number, summary: string): string {
+function buildContextText(
+  pageNumber: number | null,
+  chunkIndex: number,
+  summary: string,
+  content: ChunkContentData,
+): string {
   const pageLabel =
     typeof pageNumber === "number" && pageNumber > 0
       ? `p. ${pageNumber}`
       : `chunk ${chunkIndex + 1}`;
-  return `[${pageLabel}]\n${summary}`;
+  const captions = collectFigureTableCaptions(content);
+  const captionBlock =
+    captions.length > 0
+      ? `\n**FIGURES / TABLES**\n${captions.map((caption) => `• ${caption}`).join("\n")}\n`
+      : "";
+  return `[${pageLabel}]${captionBlock}\n${summary}`;
 }
 
 export async function* storeSummarizedChunksStream(
@@ -86,6 +97,7 @@ export async function* storeSummarizedChunksStream(
           chunk.pageNumber,
           chunk.chunkIndex,
           chunk.summary,
+          chunk.content,
         );
         return {
           id: i + index,
@@ -94,7 +106,7 @@ export async function* storeSummarizedChunksStream(
             text: chunk.summary,
             context_text: contextText,
             raw_text: chunk.content.text,
-            tables_html: chunk.content.tables,
+            tables_html: chunk.content.tables.map((table) => table.html),
             images_count: chunk.content.images.length,
             content_types: chunk.content.types,
             page_number: chunk.pageNumber,
@@ -104,7 +116,7 @@ export async function* storeSummarizedChunksStream(
             total_chunks: totalChunks,
             original_content: JSON.stringify({
               raw_text: chunk.content.text,
-              tables_html: chunk.content.tables,
+              tables: chunk.content.tables.map((table) => table.html),
               images_count: chunk.content.images.length,
             }),
           },

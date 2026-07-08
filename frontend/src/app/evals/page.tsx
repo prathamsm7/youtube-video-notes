@@ -22,12 +22,18 @@ import type {
   EvalScores,
   EvalSummary,
 } from "@/lib/eval/types";
+import { decodeEvalJobSourceId } from "@/lib/eval/eval-source";
 import { cn } from "@/lib/utils";
+
+type EvalSourceType = "video" | "document";
 
 type EvalRunResponse = {
   id: string;
   createdAt: string;
-  videoId: string;
+  sourceId: string;
+  sourceKind: EvalSourceType;
+  videoId?: string;
+  documentId?: string;
   limit: number;
   experimentName: string;
   experimentId: string;
@@ -89,6 +95,11 @@ function tonePillClass(tone: ScoreTone, isDark: boolean) {
   return isDark
     ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
     : "bg-rose-50 text-rose-800 border-rose-200";
+}
+
+function formatStoredSourceLabel(stored: string): string {
+  const source = decodeEvalJobSourceId(stored);
+  return source.kind === "document" ? `PDF ${source.id}` : source.id;
 }
 
 function goldenId(index: number) {
@@ -407,7 +418,7 @@ function EvalHistoryTable({
                   {new Date(run.createdAt).toLocaleString()}
                 </td>
                 <td className={cn("px-4 py-3 font-mono text-xs", isDark ? "text-slate-300" : "text-slate-700")}>
-                  {run.youtubeId}
+                  {formatStoredSourceLabel(run.youtubeId)}
                 </td>
                 <td className={cn("px-4 py-3 text-right tabular-nums", isDark ? "text-slate-300" : "text-slate-700")}>
                   {run.limit}
@@ -449,7 +460,8 @@ export default function EvalsPage() {
   const { isDark, toggleTheme } = useTheme();
   const router = useRouter();
 
-  const [videoInput, setVideoInput] = useState("");
+  const [sourceType, setSourceType] = useState<EvalSourceType>("video");
+  const [sourceInput, setSourceInput] = useState("");
   const [limit, setLimit] = useState(3);
   const [fullDataset, setFullDataset] = useState(false);
   const [running, setRunning] = useState(false);
@@ -461,14 +473,14 @@ export default function EvalsPage() {
   const [activeMetric, setActiveMetric] = useState<MetricKey | null>(null);
 
   const loadHistory = useCallback(async () => {
-    const params = videoInput.trim()
-      ? `?videoId=${encodeURIComponent(videoInput.trim())}`
+    const params = sourceInput.trim()
+      ? `?sourceId=${encodeURIComponent(sourceInput.trim())}`
       : "";
     const res = await apiFetch(`/api/eval/runs${params}`);
     if (!res.ok) return;
     const data = (await res.json()) as { runs: EvalRunHistoryItem[] };
     setHistory(data.runs);
-  }, [apiFetch, videoInput]);
+  }, [apiFetch, sourceInput]);
 
   useEffect(() => {
     if (!authLoading && !user) router.push("/login");
@@ -489,10 +501,14 @@ export default function EvalsPage() {
 
   const applyJobToResult = useCallback((job: EvalJobView) => {
     if (job.status !== "completed" || job.partialResults.length === 0) return;
+    const source = decodeEvalJobSourceId(job.youtubeId);
     setResult({
       id: job.evalRunId ?? job.id,
       createdAt: job.completedAt ?? job.createdAt,
-      videoId: job.youtubeId,
+      sourceId: source.id,
+      sourceKind: source.kind,
+      videoId: source.kind === "video" ? source.id : undefined,
+      documentId: source.kind === "document" ? source.id : undefined,
       limit: job.progressDone,
       experimentName: job.experimentName ?? `docuvision-job-${job.id}`,
       experimentId: job.experimentId ?? job.id,
@@ -576,7 +592,9 @@ export default function EvalsPage() {
       const res = await apiFetch("/api/eval/jobs", {
         method: "POST",
         body: JSON.stringify({
-          videoId: videoInput,
+          ...(sourceType === "video"
+            ? { videoId: sourceInput }
+            : { documentId: sourceInput }),
           full: fullDataset,
           limit: fullDataset ? undefined : limit,
         }),
@@ -593,7 +611,7 @@ export default function EvalsPage() {
       setError(err instanceof Error ? err.message : "Failed to start evaluation");
       setRunning(false);
     }
-  }, [apiFetch, videoInput, limit, fullDataset]);
+  }, [apiFetch, sourceInput, sourceType, limit, fullDataset]);
 
   const resumeJob = useCallback(async () => {
     if (!activeJob) return;
@@ -624,10 +642,14 @@ export default function EvalsPage() {
       setActiveJob(job.status === "cancelled" ? null : job);
       setRunning(false);
       if (job.partialResults.length > 0) {
+        const source = decodeEvalJobSourceId(job.youtubeId);
         setResult({
           id: job.id,
           createdAt: job.createdAt,
-          videoId: job.youtubeId,
+          sourceId: source.id,
+          sourceKind: source.kind,
+          videoId: source.kind === "video" ? source.id : undefined,
+          documentId: source.kind === "document" ? source.id : undefined,
           limit: job.progressDone,
           experimentName: job.experimentName ?? `docuvision-job-${job.id}`,
           experimentId: job.experimentId ?? job.id,
@@ -698,7 +720,7 @@ export default function EvalsPage() {
             </div>
             <p className={body}>
               Run OpenEvals judges via LangSmith using the golden dataset attached to
-              the selected video.
+              the selected video or PDF.
             </p>
           </div>
 
@@ -708,17 +730,44 @@ export default function EvalsPage() {
               isDark ? "bg-slate-900/60 border-white/10" : "bg-white border-slate-200",
             )}
           >
+            <div className="flex flex-wrap gap-2">
+              {(["video", "document"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setSourceType(kind)}
+                  disabled={running || jobBlocksNewRun}
+                  className={cn(
+                    "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                    sourceType === kind
+                      ? isDark
+                        ? "border-blue-500/50 bg-blue-500/15 text-blue-200"
+                        : "border-blue-300 bg-blue-50 text-blue-700"
+                      : isDark
+                        ? "border-white/10 text-slate-400 hover:text-slate-200"
+                        : "border-slate-200 text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  {kind === "video" ? "Video" : "PDF"}
+                </button>
+              ))}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
               <div className="space-y-1.5">
-                <label htmlFor="video-input" className={cn("text-sm font-medium", heading)}>
-                  YouTube URL or video ID
+                <label htmlFor="source-input" className={cn("text-sm font-medium", heading)}>
+                  {sourceType === "video" ? "YouTube URL or video ID" : "Document ID"}
                 </label>
                 <input
-                  id="video-input"
+                  id="source-input"
                   type="text"
-                  value={videoInput}
-                  onChange={(e) => setVideoInput(e.target.value)}
-                  placeholder="https://youtube.com/watch?v=..."
+                  value={sourceInput}
+                  onChange={(e) => setSourceInput(e.target.value)}
+                  placeholder={
+                    sourceType === "video"
+                      ? "https://youtube.com/watch?v=..."
+                      : "cuid from Document table"
+                  }
                   className={inputClass}
                   disabled={running || jobBlocksNewRun}
                 />
@@ -808,7 +857,7 @@ export default function EvalsPage() {
             <button
               type="button"
               onClick={runEval}
-              disabled={running || jobBlocksNewRun || !videoInput.trim()}
+              disabled={running || jobBlocksNewRun || !sourceInput.trim()}
               className={cn(
                 "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors",
                 "bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50",
@@ -835,7 +884,7 @@ export default function EvalsPage() {
           <section className="space-y-4">
             <h2 className={cn("text-lg font-semibold", heading)}>Past runs</h2>
             <p className={cn("text-sm", body)}>
-              Saved eval results for comparison. Filtered by video ID when one is entered above.
+              Saved eval results for comparison. Filtered by source ID when one is entered above.
             </p>
             <EvalHistoryTable runs={history} isDark={isDark} body={body} />
           </section>
@@ -845,7 +894,8 @@ export default function EvalsPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <h2 className={cn("text-lg font-semibold", heading)}>
-                    Experiment — {result.videoId}
+                    Experiment — {result.sourceKind === "document" ? "PDF " : ""}
+                    {result.sourceId}
                   </h2>
                   <p className={cn("text-sm", body)}>
                     {result.experimentName}

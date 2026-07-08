@@ -7,7 +7,12 @@ import {
   toEvalJobView,
 } from "@/lib/eval/job-db";
 import { loadEvalDataset } from "@/lib/eval/load-dataset";
-import { resolveYoutubeId } from "@/lib/eval/resolve-video-id";
+import {
+  encodeEvalJobSourceId,
+  evalSourceLabel,
+  loadDatasetParams,
+  resolveEvalSource,
+} from "@/lib/eval/eval-source";
 import { scheduleEvalJob } from "@/lib/eval/schedule-job";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +25,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const videoInput = typeof body.videoId === "string" ? body.videoId : "";
+  const source = resolveEvalSource({
+    videoId: typeof body.videoId === "string" ? body.videoId : undefined,
+    documentId: typeof body.documentId === "string" ? body.documentId : undefined,
+  });
   const full = body.full === true;
 
   let limit: number | null = null;
@@ -31,10 +39,12 @@ export async function POST(req: NextRequest) {
       : 3;
   }
 
-  const videoId = resolveYoutubeId(videoInput);
-  if (!videoId) {
+  if (!source) {
     return NextResponse.json(
-      { detail: "Provide a valid YouTube URL or 11-character video ID." },
+      {
+        detail:
+          "Provide a valid YouTube URL/ID or document ID (not both).",
+      },
       { status: 400 },
     );
   }
@@ -52,13 +62,13 @@ export async function POST(req: NextRequest) {
   }
 
   const examples = await loadEvalDataset({
-    youtubeId: videoId,
+    ...loadDatasetParams(source),
     limit: limit ?? undefined,
   });
 
   if (examples.length === 0) {
     return NextResponse.json(
-      { detail: `No golden dataset found for video ${videoId}.` },
+      { detail: `No golden dataset found for ${evalSourceLabel(source)}.` },
       { status: 400 },
     );
   }
@@ -66,7 +76,7 @@ export async function POST(req: NextRequest) {
   try {
     const job = await createEvalJob({
       userId: user.id,
-      youtubeId: videoId,
+      youtubeId: encodeEvalJobSourceId(source),
       limit,
       progressTotal: examples.length,
     });
