@@ -1,10 +1,8 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { stream } from "@/lib/core/ai-handler";
-import {
-  CHAT_MODEL_ANSWER_PRIMARY,
-  RETRIEVAL_CHUNK_LIMIT,
-} from "@/lib/core/rag/constants";
+import { CHAT_MODEL_ANSWER_PRIMARY } from "@/lib/core/rag/constants";
+import { VIDEO_RETRIEVAL_CHUNK_LIMIT } from "../constants";
 import { embedQuery } from "@/lib/core/rag/embedding";
 import { buildOffTopicResponse, isOffTopicQuery } from "@/lib/core/rag/off-topic";
 import { detectQueryLanguage } from "@/lib/core/rag/query-router-schema";
@@ -155,7 +153,7 @@ async function prepareRagNode(
     state.videoId,
     searchQuery,
     queryVector,
-    RETRIEVAL_CHUNK_LIMIT,
+    VIDEO_RETRIEVAL_CHUNK_LIMIT,
   );
 
   emit(config, {

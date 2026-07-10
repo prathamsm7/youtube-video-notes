@@ -1,10 +1,10 @@
 import type { RetrieveContextResult } from "../types";
-import {
-  RETRIEVAL_CANDIDATE_LIMIT,
-  RETRIEVAL_CHUNK_LIMIT,
-} from "@/lib/core/rag/constants";
 import { getQdrantClient } from "@/lib/core/rag/clients/qdrant";
 import { rerankByRelevance } from "@/lib/core/rag/reranker";
+import {
+  VIDEO_RETRIEVAL_CANDIDATE_LIMIT,
+  VIDEO_RETRIEVAL_CHUNK_LIMIT,
+} from "../constants";
 import {
   collectionExistsForVideo,
   collectionNameForVideo,
@@ -104,8 +104,8 @@ export async function retrieveContextWithVector(
   videoId: string,
   searchQuery: string,
   queryVector: number[],
-  limit = RETRIEVAL_CHUNK_LIMIT,
-  candidateLimit = RETRIEVAL_CANDIDATE_LIMIT,
+  limit = VIDEO_RETRIEVAL_CHUNK_LIMIT,
+  candidateLimit = VIDEO_RETRIEVAL_CANDIDATE_LIMIT,
 ): Promise<RetrieveContextResult> {
   if (!(await collectionExistsForVideo(videoId))) {
     return { context: null, chunkCount: 0, documents: [] };
